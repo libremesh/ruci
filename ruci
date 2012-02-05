@@ -50,6 +50,7 @@ pushConfigToIp () {
   
 
   log $CNAME "Config sent. Applying changes..."
+  ERRLOG="/tmp/ssh.${CNAME////}.$EPOCH"
   ssh $IPADDR "
           (/bin/rm -r /etc.failsafe/ 2>/dev/null ;
           /bin/cp -a /etc /etc.failsafe \
@@ -57,12 +58,36 @@ pushConfigToIp () {
        && /bin/mv /tmp/etc.new.$EPOCH/* /etc/ \
       )&&(/bin/sleep $REBOOT_WAIT \
        && $REBOOT_CMD & )" \
-       &>/tmp/ssh.${CNAME////}.$EPOCH 
+       &>$ERRLOG
   RETVAL=$?
-  log $CNAME "ssh: $(</tmp/ssh.${CNAME////}.$EPOCH)"
+  [ -s $ERRLOG ] && log $CNAME "ssh: $(<$ERRLOG)"
   [ $RETVAL -ne 0 ] && return
 
   log $CNAME "Done.$([ $REBOOT_CMD != $NO_REBOOT_CMD ] && echo " Rebooting in $REBOOT_WAIT secs...")"
+}
+
+pullConfigFromIp () {
+  CNAME=$1
+  IPADDR=$2
+
+  if [ -n $(hg st $CNAME) ] ; then
+    log $CNAME "Directory contains uncommited changes. Autocommiting..."
+    hg commit -A -m "Autocommit before pulling from $IPADDR" $CNAME 
+  fi
+
+  
+  log $CNAME "Pulling config with scp from $IPADDR ... "
+  ERRLOG="/tmp/scp.${CNAME////}.$EPOCH"
+  scp -pqr $IPADDR:"$BACKUP_FILELIST" $CNAME/etc.$EPOCH  &>$ERRLOG
+  RETVAL=$?
+  [ -s $ERRLOG ] && log $CNAME "scp: $(<$ERRLOG)"
+  [ $RETVAL -ne 0 ] && return
+
+  [ -d $CNAME/etc ] && rm -r $CNAME/etc
+  mv $CNAME/etc.$EPOCH $CNAME/etc
+
+  log $CNAME "Done."
+  
 }
 
 tstamp () {
@@ -105,8 +130,33 @@ pushConfigs () {
 }
 
 pullConfigs () {
-  # TODO
-  exit 1
+
+  [ $# -eq 0 ] && usage
+
+  until [ $# -eq 0 ] ; do
+    ARG="$1"
+    shift
+  
+    case "$ARG" in
+      -i|--ip ) IPADDR=$1 ; shift ;;
+      * )
+        CNAME="$ARG"
+  
+        if ! [ -d $CNAME ] && [ -z $IPADDR ] ; then 
+	  log $CNAME "Directory doesn't exist! Please prepend --ip to specify where to pull from."
+	  continue
+	fi
+	
+        [ -n "$IPADDR" ] || IPADDR=$(getIpFromCname $CNAME)
+  
+        pullConfigFromIp $CNAME $IPADDR &
+        
+        unset IPADDR
+      ;;
+    esac
+  
+  done
+
 }
 
 confirmConfigs () {
