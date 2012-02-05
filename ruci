@@ -42,10 +42,11 @@ pushConfigToIp () {
   IPADDR=$2
 
   log $CNAME "Sending config with scp to $IPADDR ... "
-  scp -pqr $CNAME/etc $IPADDR:/tmp/etc.new.$EPOCH \
-    &>/tmp/scp.${CNAME////}.$EPOCH 
+  ERRLOG="/tmp/scp.${CNAME////}.$EPOCH"
+  scp -pr $CNAME/etc $IPADDR:/tmp/etc.new.$EPOCH \
+    >/dev/null 2>$ERRLOG
   RETVAL=$?
-  log $CNAME "scp: $(</tmp/scp.${CNAME////}.$EPOCH)"
+  log $CNAME "scp: $(<$ERRLOG)"
   [ $RETVAL -ne 0 ] && return
   
 
@@ -58,7 +59,7 @@ pushConfigToIp () {
        && /bin/mv /tmp/etc.new.$EPOCH/* /etc/ \
       )&&(/bin/sleep $REBOOT_WAIT \
        && $REBOOT_CMD & )" \
-       &>$ERRLOG
+       >/dev/null 2>$ERRLOG
   RETVAL=$?
   [ -s $ERRLOG ] && log $CNAME "ssh: $(<$ERRLOG)"
   [ $RETVAL -ne 0 ] && return
@@ -79,7 +80,7 @@ pullConfigFromIp () {
   log $CNAME "Pulling config with scp from $IPADDR ... "
   ERRLOG="/tmp/scp.${CNAME////}.$EPOCH"
   mkdir -p $CNAME/etc.$EPOCH/
-  scp -pqr $IPADDR:"$BACKUP_FILELIST" $CNAME/etc.$EPOCH/  &>$ERRLOG
+  scp -pr $IPADDR:"$BACKUP_FILELIST" $CNAME/etc.$EPOCH/ >/dev/null 2>$ERRLOG 
   RETVAL=$?
   [ -s $ERRLOG ] && log $CNAME "scp: $(<$ERRLOG)"
   [ $RETVAL -ne 0 ] && return
