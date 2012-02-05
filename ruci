@@ -82,6 +82,7 @@ pullConfigFromIp () {
   mkdir -p $CNAME/etc.$EPOCH/
   scp -pr $IPADDR:"$BACKUP_FILELIST" $CNAME/etc.$EPOCH/ >/dev/null 2>$ERRLOG 
   RETVAL=$?
+  rmdir --ignore-fail-on-non-empty $CNAME/etc.$EPOCH/
   [ -s $ERRLOG ] && log $CNAME "scp: $(<$ERRLOG)"
   [ $RETVAL -ne 0 ] && return
 
