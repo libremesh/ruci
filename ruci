@@ -1,0 +1,136 @@
+#!/bin/bash
+#
+#
+
+REBOOT_WAIT=300 # in seconds
+BACKUP_FILELIST="/etc/config/ /etc/dropbear/ /etc/firewall.user /etc/group /etc/hosts /etc/inittab /etc/passwd /etc/profile /etc/rc.local /etc/shadow /etc/shells /etc/sysctl.conf"
+
+REBOOT_CMD="/sbin/reboot"
+NO_REBOOT_CMD="/bin/true"
+EPOCH=$(date +%s)
+
+usage () {
+  cat << EOF
+
+Usage: $0 push [--no-reboot] [--wait secs] [--ip dest-ip] NAME [[--ip dest-ip] NAME] ...
+       $0 pull [--ip dest-ip] NAME [[--ip dest-ip] NAME] ...
+       $0 confirm NAME [NAME] ...
+
+Manage remote uci configuration in NAME(s)
+
+  -w, --wait NUM	After writing configuration, wait for NUM seconds
+  				before reboot.
+  -i, --ip HOST		Push the configuration to specified IP or host.
+  				Applies only to the next NAME specified in command line.
+  -n, --no-reboot	Prevent rebooting after apply
+
+EOF
+  exit 1
+}
+
+getIpFromCname () {
+  CNAME=$1
+
+  /home/guido/src/uci/uci -c $CNAME/etc/config/ get network.lan.ipaddr
+
+  ### TODO: reimplementar sin usar uci,
+  ###       usando bash + sed
+}
+
+pushConfigToIp () {
+  CNAME=$1
+  IPADDR=$2
+
+  log $CNAME "Sending config with scp to $IPADDR ... "
+  scp -pqr $CNAME/etc $IPADDR:/tmp/etc.new.$EPOCH \
+    &>/tmp/scp.${CNAME////}.$EPOCH 
+  RETVAL=$?
+  log $CNAME "scp: $(</tmp/scp.${CNAME////}.$EPOCH)"
+  [ $RETVAL -ne 0 ] && return
+  
+
+  log $CNAME "Config sent. Applying changes..."
+  ssh $IPADDR "
+          (/bin/rm -r /etc.failsafe/ 2>/dev/null ;
+          /bin/cp -a /etc /etc.failsafe \
+       && /bin/rm -r $BACKUP_FILELIST \
+       && /bin/mv /tmp/etc.new.$EPOCH/* /etc/ \
+      )&&(/bin/sleep $REBOOT_WAIT \
+       && $REBOOT_CMD & )" \
+       &>/tmp/ssh.${CNAME////}.$EPOCH 
+  RETVAL=$?
+  log $CNAME "ssh: $(</tmp/ssh.${CNAME////}.$EPOCH)"
+  [ $RETVAL -ne 0 ] && return
+
+  log $CNAME "Done.$([ $REBOOT_CMD != $NO_REBOOT_CMD ] && echo " Rebooting in $REBOOT_WAIT secs...")"
+}
+
+tstamp () {
+  date +%F_%T
+}
+
+log () {
+  CNAME="$1"
+  TEXT="$2"
+  echo "[$CNAME] $(tstamp): $TEXT"
+}
+ 
+pushConfigs () {
+
+  [ $# -eq 0 ] && usage
+
+  until [ $# -eq 0 ] ; do
+    ARG="$1"
+    shift
+  
+    case "$ARG" in
+      -i|--ip ) IPADDR=$1 ; shift ;;
+      -w|--wait ) if [ -z "${1//[0-9]/}" ] ; then REBOOT_WAIT=$1 ; shift ; else usage ; fi ;;
+      -n|--no-reboot ) REBOOT_CMD="/bin/true" ;;
+      * )
+        CNAME="$ARG"
+  
+        if ! [ -d $CNAME ] ; then log $CNAME "Directory doesn't exist!" ; unset IPADDR ; continue ; fi
+  
+        [ -n "$IPADDR" ] || IPADDR=$(getIpFromCname $CNAME)
+  
+        pushConfigToIp $CNAME $IPADDR &
+        
+        unset IPADDR
+      ;;
+    esac
+  
+  done
+
+}
+
+pullConfigs () {
+  # TODO
+  exit 1
+}
+
+confirmConfigs () {
+  # TODO , ssh $1 "rm -r /etc.failsafe"
+  exit 1
+}
+
+case $1 in
+  push )
+    shift
+    pushConfigs $*
+  ;;
+  pull )
+    shift
+    pullConfigs $*
+  ;;
+  confirm )
+    shift
+    confirmConfigs $*
+  ;;
+  * )
+    usage
+  ;;
+esac
+
+log "*" "All jobs started."
+wait
