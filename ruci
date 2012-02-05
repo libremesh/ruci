@@ -70,7 +70,7 @@ pullConfigFromIp () {
   CNAME=$1
   IPADDR=$2
 
-  if [ -n $(hg st $CNAME) ] ; then
+  if ! [ -z "$(hg st $CNAME)" ] ; then
     log $CNAME "Directory contains uncommited changes. Autocommiting..."
     hg commit -A -m "Autocommit before pulling from $IPADDR" $CNAME 
   fi
@@ -78,7 +78,8 @@ pullConfigFromIp () {
   
   log $CNAME "Pulling config with scp from $IPADDR ... "
   ERRLOG="/tmp/scp.${CNAME////}.$EPOCH"
-  scp -pqr $IPADDR:"$BACKUP_FILELIST" $CNAME/etc.$EPOCH  &>$ERRLOG
+  mkdir -p $CNAME/etc.$EPOCH/
+  scp -pqr $IPADDR:"$BACKUP_FILELIST" $CNAME/etc.$EPOCH/  &>$ERRLOG
   RETVAL=$?
   [ -s $ERRLOG ] && log $CNAME "scp: $(<$ERRLOG)"
   [ $RETVAL -ne 0 ] && return
