@@ -6,6 +6,7 @@
 ### Usage: $0 push [--no-reboot] [--wait secs] [--ip <host>] NAME [[--ip <host>] NAME] ...
 ###        $0 pull [--ip <host>] NAME [[--ip <host>] NAME] ...
 ###        $0 confirm NAME [NAME] ...
+###        $0 status  NAME [NAME] ...
 ### 
 ### Manage remote uci configuration in NAME(s)
 ### 
@@ -16,12 +17,11 @@
 ###  -n, --no-reboot	Prevent rebooting after pushing and applying configuration.
 ### 
 
-REBOOT_WAIT=300 # in seconds
-BACKUP_FILELIST="/etc/config/ /etc/dropbear/ /etc/crontabs/ /etc/firewall.user /etc/group /etc/hosts /etc/inittab /etc/passwd /etc/profile /etc/rc.local /etc/shadow /etc/shells /etc/sysctl.conf"
-
-REBOOT_CMD="/sbin/reboot"
-NO_REBOOT_CMD="/bin/true"
-EPOCH=$(date +%s)
+export REBOOT_WAIT=300  # in seconds
+export BACKUP_FILELIST="/etc/config/ /etc/dropbear/ /etc/crontabs/ /etc/firewall.user /etc/group /etc/hosts /etc/inittab /etc/passwd /etc/profile /etc/rc.local /etc/shadow /etc/shells /etc/sysctl.conf"
+export REBOOT_CMD="/sbin/reboot"
+export NO_REBOOT_CMD="/bin/true"
+export EPOCH=$(date +%s)
 
 usage () {
   [ -n "$1" ] && echo "$*"
@@ -38,30 +38,57 @@ getIpFromCname () {
   ###       usando bash + sed
 }
 
+tstamp () {
+  date +%F_%T.%3N
+}
+
+log () {
+  CNAME="$1"
+  TEXT="$2"
+  echo "$TEXT" | sed "s|^|[$CNAME] $(tstamp): |" | tee -a $LOGFILE
+}
+ 
+try () {
+  CNAME="$1"
+  CMDLINE=$2
+  CMD="${CMDLINE%% *}"
+  
+  ERRLOG="/tmp/$CMD.${CNAME////}.$EPOCH"
+  
+  eval $CMDLINE &> $ERRLOG
+  RETVAL=$?
+  if ! [ -z "$(<$ERRLOG)" ] ; then
+    sed "s|^|($CMD) |" -i $ERRLOG
+    log $CNAME "$(<$ERRLOG)"
+  fi
+  rm -f $ERRLOG
+  return $RETVAL
+}
+
 pullConfigFromIp () {
   CNAME="$1"
   IPADDR="$2"
-
-  if ! [ -z "$(hg st $CNAME)" ] ; then
+  SKIP_UPDATE="$3"
+  
+  if ! [ -z "$(hg status $CNAME)" ] ; then
     log $CNAME "Directory contains uncommited changes. Autocommiting..."
-    hg commit -A -m "Autocommit before pulling from $IPADDR" $CNAME 
+    try $CNAME "hg commit -A -m \"Autocommit before pulling from $IPADDR\" $CNAME" || return
   fi
 
+  log $CNAME Pulling config from $IPADDR ...
+  try $CNAME "ssh $IPADDR \"/bin/tar czf - $BACKUP_FILELIST 2>/dev/null\" >$CNAME/etc.$EPOCH.tar.gz" \
+    || (RETVAL=$? ; rm -f $CNAME/etc.$EPOCH.tar.gz ; false) || return $RETVAL
   
-  log $CNAME "Pulling config from $IPADDR ... "
-  ERRLOG="/tmp/ssh.${CNAME////}.$EPOCH"
   mkdir -p $CNAME/etc.$EPOCH/
-  ssh $IPADDR "/bin/tar czf - $BACKUP_FILELIST" 2>$ERRLOG | tar xzf - -C $CNAME/etc.$EPOCH 
-  RETVAL=$?
-  rmdir --ignore-fail-on-non-empty $CNAME/etc.$EPOCH/
-  [ -z "$(<$ERRLOG)" ] || log $CNAME "ssh: $(<$ERRLOG)"
-  rm -f $ERRLOG
-  [ $RETVAL -ne 0 ] && return
+  try $CNAME "tar xzf $CNAME/etc.$EPOCH.tar.gz --xform \"s-^etc/--\" -C $CNAME/etc.$EPOCH" \
+    || (RETVAL=$? ; rm -rf $CNAME/etc.$EPOCH/ ; false) || return $RETVAL
 
-  rm -rf $CNAME/etc
-  mv $CNAME/etc.$EPOCH $CNAME/etc
-
-  log $CNAME "Done."
+  if [ -z SKIP_UPDATE ] ; then 
+    rm -rf $CNAME/etc $CNAME/etc.$EPOCH.tar.gz
+    mv $CNAME/etc.$EPOCH $CNAME/etc
+  fi
+  
+  log $CNAME "Pulled successfully."
   
 }
 
@@ -76,7 +103,7 @@ pushConfigToIp () {
   RETVAL=$?
   [ -z "$(<$ERRLOG)" ] || log $CNAME "scp: $(<$ERRLOG)"
   rm -f $ERRLOG
-  [ $RETVAL -ne 0 ] && return
+  [ $RETVAL -ne 0 ] && return $RETVAL
   
 
   log $CNAME "Config sent. Applying changes..."
@@ -92,7 +119,7 @@ pushConfigToIp () {
   RETVAL=$?
   [ -z "$(<$ERRLOG)" ] || log $CNAME "ssh: $(<$ERRLOG)"
   rm -f $ERRLOG
-  [ $RETVAL -ne 0 ] && return
+  [ $RETVAL -ne 0 ] && return $RETVAL
 
   log $CNAME "Done.$([ $REBOOT_CMD != $NO_REBOOT_CMD ] && echo " Rebooting in $REBOOT_WAIT secs...")"
 }
@@ -108,23 +135,23 @@ confirmConfigToIp () {
   RETVAL=$?
   [ -z "$(<$ERRLOG)" ] || log $CNAME "ssh: $(<$ERRLOG)"
   rm -f $ERRLOG
-  [ $RETVAL -ne 0 ] && return
+  [ $RETVAL -ne 0 ] && return $RETVAL
 
   log $CNAME "Done."
 }
 
-tstamp () {
-  date +%F_%T
+statusConfigFromIp () {
+  CNAME="$1"
+  IPADDR="$2"
+
+  pullConfigFromIp $CNAME $IPADDR dont_update >/dev/null
+          
+  diff -qr $CNAME/etc $CNAME/etc.$EPOCH &>/dev/null 
+  RETVAL=$?
+  rm -rf $CNAME/etc.$EPOCH
 }
 
-log () {
-  CNAME="$1"
-  TEXT="$2"
-  echo "[$CNAME] $(tstamp): $TEXT" | tee -a $LOGFILE
-}
- 
 pullConfigs () {
-  [ -n "$1" ] || usage "Error: No NAME(s) specified on command line."
 
   while [ -n "$1" ]; do
     ARG="$1"
@@ -153,7 +180,6 @@ pullConfigs () {
 }
 
 pushConfigs () {
-  [ -n "$1" ] || usage "Error: No NAME(s) specified on command line."
 
   while [ -n "$1" ]; do
     ARG="$1"
@@ -186,7 +212,6 @@ pushConfigs () {
 }
 
 confirmConfigs () {
-  [ -n "$1" ] || usage "Error: No NAME(s) specified on command line."
 
   while [ -n "$1" ]; do
     ARG="$1"
@@ -209,19 +234,37 @@ confirmConfigs () {
 }
 
 statusConfigs () {
-  exit 1
+
+  while [ -n "$1" ]; do
+    CNAME="$1"
+    shift
+
+    if ! [ -d $CNAME ] ; then log $CNAME "Directory not found. Ignoring host." ; continue ; fi
+    
+    IPADDR=$(getIpFromCname $CNAME)
+    
+    statusConfigFromIp $CNAME $IPADDR 
+    
+    case $RETVAL in
+      0) log $CNAME "Reachable and updated." ;;
+      1) log $CNAME "Reachable, with changes pending." ;;
+      *) log $CNAME "Down." ;;
+    esac
+  done
+
 }
 
 export ACTION="$1"
+shift
 
 export LOGFILE=/tmp/$0-$ACTION.log
 rm -f $LOGFILE
 
 case $ACTION in
-  pull ) shift ; pullConfigs "$*" ;;
-  push ) shift ; pushConfigs "$*" ;;
-  confirm ) shift ; confirmConfigs "$*" ;;
-  status ) shift ; statusConfigs "$*" ;;
+  pull | push | confirm | status ) 
+    [ -z "$*" ] && usage "Error: No NAME(s) specified on command line."
+    ${ACTION}Configs $*
+  ;;
   "" ) usage ;;
   * ) usage "Error: Unknown action \"$ACTION\"" ;;
 esac
