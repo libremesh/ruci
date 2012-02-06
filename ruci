@@ -262,4 +262,5 @@ esac
 
 log "*" "All jobs started. Sorted logfile will be written to $LOGFILE"
 wait
-sort $LOGFILE | tee $LOGFILE &>/dev/null
+sort $LOGFILE > $LOGFILE.sort
+mv -f $LOGFILE.sort $LOGFILE
