@@ -108,6 +108,10 @@ pushConfigToIp () {
   try $CNAME "scp -pr $CNAME/etc $IPADDR:/tmp/etc.new.$EPOCH >/dev/null" \
     || return
   
+  try $CNAME "ssh $IPADDR /bin/sh -c \"[ -d /etc.failsafe-to-apply/ ]\" " \
+    && ( log $CNAME "Previous push hasn't been confirmed yet. Use \`$0 confirm $CNAME\` first. Skipping..." 
+         false ) || return
+    
   log $CNAME "Config sent. Applying changes..."
   try $CNAME "ssh $IPADDR \"    /bin/rm -rf /etc.failsafe/ ;
                               ( /bin/cp -a /etc /etc.failsafe \
@@ -124,8 +128,8 @@ confirmConfigToIp () {
   CNAME=${1:?}
   IPADDR=${2:?}
 
-  log $CNAME "Trying to remove /etc.failsafe in $IPADDR ... "
-  try $CNAME "ssh $IPADDR \"/bin/rm -rf /etc.failsafe/\" " \
+  log $CNAME "Trying to remove /etc.failsafe-to-apply in $IPADDR ... "
+  try $CNAME "ssh $IPADDR \"/bin/rm -rf /etc.failsafe-to-apply/\" " \
     || return
 
   log $CNAME "Done."
