@@ -32,7 +32,7 @@ usage () {
 }
 
 getIpFromCname () {
-  CNAME=$1
+  CNAME=${1:?}
 
   /home/guido/src/uci/uci -c $CNAME/etc/config/ get network.lan.ipaddr
 
@@ -45,7 +45,7 @@ tstamp () {
 }
 
 log () {
-  CNAME=$1
+  CNAME=${1:?}
   shift
   TEXT="$*"
   
@@ -53,8 +53,8 @@ log () {
 }
  
 try () {
-  CNAME=$1
-  CMDLINE=$2
+  CNAME=${1:?}
+  CMDLINE=${2:?}
   CMD=${CMDLINE%% *}
   
   ERRLOG="/tmp/$CMD.${CNAME////}.$EPOCH"
@@ -70,8 +70,8 @@ try () {
 }
 
 pullConfigFromIp () {
-  CNAME=$1
-  IPADDR=$2
+  CNAME=${1:?}
+  IPADDR=${2:?}
   SKIP_UPDATE=$3
   
   RETVAL=
@@ -101,8 +101,8 @@ pullConfigFromIp () {
 }
 
 pushConfigToIp () {
-  CNAME=$1
-  IPADDR=$2
+  CNAME=${1:?}
+  IPADDR=${2:?}
 
   log $CNAME "Sending config with scp to $IPADDR ... "
   try $CNAME "scp -pr $CNAME/etc $IPADDR:/tmp/etc.new.$EPOCH >/dev/null" \
@@ -121,8 +121,8 @@ pushConfigToIp () {
 }
 
 confirmConfigToIp () {
-  CNAME=$1
-  IPADDR=$2
+  CNAME=${1:?}
+  IPADDR=${2:?}
 
   log $CNAME "Trying to remove /etc.failsafe in $IPADDR ... "
   try $CNAME "ssh $IPADDR \"/bin/rm -rf /etc.failsafe/\" " \
@@ -132,8 +132,8 @@ confirmConfigToIp () {
 }
 
 statusConfigFromIp () {
-  CNAME=$1
-  IPADDR=$2
+  CNAME=${1:?}
+  IPADDR=${2:?}
   RETVAL=
   
   try $CNAME "pullConfigFromIp $CNAME $IPADDR skip_update" >/dev/null \
@@ -201,7 +201,8 @@ pushConfigs () {
       * )
         CNAME=$ARG
   
-        [ -d $CNAME ] || ( log $CNAME "Directory not found. Ignoring host." ; unset IPADDR ; continue )
+        [ -d $CNAME ] \
+          || ( log $CNAME "Directory not found. Ignoring host." ; unset IPADDR ; false) || continue 
   
         [ -z "$IPADDR" ] && IPADDR=$(getIpFromCname $CNAME)
   
@@ -221,7 +222,8 @@ confirmConfigs () {
     CNAME=$1
     shift
   
-    [ -d $CNAME ] || ( log $CNAME "Directory not found. Ignoring host." ; continue )
+    [ -d $CNAME ] \
+      || ( log $CNAME "Directory not found. Ignoring host." ; false ) || continue
     
     IPADDR=$(getIpFromCname $CNAME)
 
@@ -237,7 +239,8 @@ statusConfigs () {
     CNAME=$1
     shift
 
-    [ -d $CNAME ] || ( log $CNAME "Directory not found. Ignoring host." ; continue )
+    [ -d $CNAME ] \
+      || ( log $CNAME "Directory not found. Ignoring host." ; false ) || continue
     
     IPADDR=$(getIpFromCname $CNAME)
     
