@@ -103,14 +103,18 @@ pullConfigFromIp () {
 pushConfigToIp () {
   CNAME=${1:?}
   IPADDR=${2:?}
-
+  RETVAL=
+  
   log $CNAME "Sending config with scp to $IPADDR ... "
   try $CNAME "scp -pr $CNAME/etc $IPADDR:/tmp/etc.new.$EPOCH >/dev/null" \
     || return
   
-  try $CNAME "ssh $IPADDR /bin/sh -c \"[ -d /etc.failsafe-to-apply/ ]\" " \
-    && ( log $CNAME "Previous push hasn't been confirmed yet. Use \`$0 confirm $CNAME\` first. Skipping..." 
-         false ) || return
+  try $CNAME "ssh $IPADDR /bin/sh -c \'[ -d /etc.failsafe-to-apply/ ]\' "
+    RETVAL=$?
+    if [ $RETVAL -eq 0 ] ; then
+      log $CNAME "Previous push hasn't been confirmed yet. Use \`$0 confirm $CNAME\` first. Skipping..." 
+      return
+    fi
     
   log $CNAME "Config sent. Applying changes..."
   try $CNAME "ssh $IPADDR \"    /bin/rm -rf /etc.failsafe/ ;
@@ -139,19 +143,23 @@ statusConfigFromIp () {
   CNAME=${1:?}
   IPADDR=${2:?}
   RETVAL=
+  STATUSMSG=
   
   try $CNAME "pullConfigFromIp $CNAME $IPADDR skip_update" >/dev/null \
-    || ( log $CNAME "Down." ; false ) || return
+    || ( log $CNAME "$IPADDR Down." ; false ) || return
 
+  try $CNAME "ssh $IPADDR /bin/sh -c \'[ -d /etc.failsafe-to-apply/ ]\' " \
+    && STATUSMSG=" Counting down to revert-to-failsafe. Use \`$0 confirm $CNAME\`."
+    
   try $CNAME "diff -qr $CNAME/etc $CNAME/etc.$EPOCH" >/dev/null
     RETVAL=$?
 
   rm -rf $CNAME/etc.$EPOCH
   
   case $RETVAL in
-    0) log $CNAME "Reachable and updated." ;;
-    1) log $CNAME "Reachable, with changes pending." ;;
-    *) log $CNAME "Unknown error ($RETVAL) in diff." ;;
+    0) log $CNAME "$IPADDR Reachable and updated.$STATUSMSG" ;;
+    1) log $CNAME "$IPADDR Reachable, with changes pending.$STATUSMSG" ;;
+    *) log $CNAME "Unknown error ($RETVAL) in diff.$STATUSMSG" ;;
   esac
 }
 
@@ -259,9 +267,12 @@ export LOGFILE=/tmp/$0-$ACTION.log
 rm -f $LOGFILE
 
 case $ACTION in
-  pull | push | confirm | status ) 
+  pull | push | confirm ) 
     [ -z "$*" ] && usage "Error: No NAME(s) specified on command line."
     ${ACTION}Configs $*
+  ;;
+  status )
+    ${ACTION}Configs ${*:-./*/}
   ;;
   "" ) usage ;;
   * ) usage "Error: Unknown action \"$ACTION\"" ;;
