@@ -16,6 +16,8 @@
 ###                     Applies only to the next NAME specified in command line.
 ###  -n, --no-reboot	Prevent rebooting after pushing and applying configuration.
 ### 
+#
+#
 
 export REBOOT_WAIT=300  # in seconds
 export BACKUP_FILELIST="/etc/config/ /etc/dropbear/ /etc/crontabs/ /etc/firewall.user /etc/group /etc/hosts /etc/inittab /etc/passwd /etc/profile /etc/rc.local /etc/shadow /etc/shells /etc/sysctl.conf"
@@ -30,7 +32,7 @@ usage () {
 }
 
 getIpFromCname () {
-  CNAME="$1"
+  CNAME=$1
 
   /home/guido/src/uci/uci -c $CNAME/etc/config/ get network.lan.ipaddr
 
@@ -43,21 +45,23 @@ tstamp () {
 }
 
 log () {
-  CNAME="$1"
-  TEXT="$2"
+  CNAME=$1
+  shift
+  TEXT="$*"
+  
   echo "$TEXT" | sed "s|^|[$CNAME] $(tstamp): |" | tee -a $LOGFILE
 }
  
 try () {
-  CNAME="$1"
+  CNAME=$1
   CMDLINE=$2
-  CMD="${CMDLINE%% *}"
+  CMD=${CMDLINE%% *}
   
   ERRLOG="/tmp/$CMD.${CNAME////}.$EPOCH"
   
   eval $CMDLINE &> $ERRLOG
   RETVAL=$?
-  if ! [ -z "$(<$ERRLOG)" ] ; then
+  if [ -r "$ERRLOG" ] && [ -s "$ERRLOG" ] ; then
     sed "s|^|($CMD) |" -i $ERRLOG
     log $CNAME "$(<$ERRLOG)"
   fi
@@ -66,30 +70,34 @@ try () {
 }
 
 pullConfigFromIp () {
-  CNAME="$1"
-  IPADDR="$2"
-  SKIP_UPDATE="$3"
+  CNAME=$1
+  IPADDR=$2
+  SKIP_UPDATE=$3
   
-  if ! [ -z "$(hg status $CNAME)" ] ; then
+  RETVAL=
+  
+  if [ -z "$SKIP_UPDATE" ] && [ -n "$(hg status $CNAME)" ] ; then
     log $CNAME "Directory contains uncommited changes. Autocommiting..."
-    try $CNAME "hg commit -A -m \"Autocommit before pulling from $IPADDR\" $CNAME" || return
+    try $CNAME "hg commit -A -m \"Autocommit before pulling from $IPADDR\" $CNAME" \
+      || return
   fi
 
-  log $CNAME Pulling config from $IPADDR ...
+  log $CNAME "Pulling config from $IPADDR ..."
   try $CNAME "ssh $IPADDR \"/bin/tar czf - $BACKUP_FILELIST 2>/dev/null\" >$CNAME/etc.$EPOCH.tar.gz" \
     || (RETVAL=$? ; rm -f $CNAME/etc.$EPOCH.tar.gz ; false) || return $RETVAL
   
   mkdir -p $CNAME/etc.$EPOCH/
   try $CNAME "tar xzf $CNAME/etc.$EPOCH.tar.gz --xform \"s-^etc/--\" -C $CNAME/etc.$EPOCH" \
-    || (RETVAL=$? ; rm -rf $CNAME/etc.$EPOCH/ ; false) || return $RETVAL
+    || (RETVAL=$? ; rm -rf $CNAME/etc.$EPOCH{/,.tar.gz} ; false) || return $RETVAL
 
-  if [ -z SKIP_UPDATE ] ; then 
-    rm -rf $CNAME/etc $CNAME/etc.$EPOCH.tar.gz
+  rm -rf $CNAME/etc.$EPOCH.tar.gz
+
+  if [ -z "$SKIP_UPDATE" ] ; then 
+    rm -rf $CNAME/etc
     mv $CNAME/etc.$EPOCH $CNAME/etc
   fi
   
   log $CNAME "Pulled successfully."
-  
 }
 
 pushConfigToIp () {
@@ -97,31 +105,19 @@ pushConfigToIp () {
   IPADDR=$2
 
   log $CNAME "Sending config with scp to $IPADDR ... "
-  ERRLOG="/tmp/scp.${CNAME////}.$EPOCH"
-  scp -pr $CNAME/etc $IPADDR:/tmp/etc.new.$EPOCH \
-    >/dev/null 2>$ERRLOG
-  RETVAL=$?
-  [ -z "$(<$ERRLOG)" ] || log $CNAME "scp: $(<$ERRLOG)"
-  rm -f $ERRLOG
-  [ $RETVAL -ne 0 ] && return $RETVAL
+  try $CNAME "scp -pr $CNAME/etc $IPADDR:/tmp/etc.new.$EPOCH >/dev/null" \
+    || return
   
-
   log $CNAME "Config sent. Applying changes..."
-  ERRLOG="/tmp/ssh.${CNAME////}.$EPOCH"
-  ssh $IPADDR "
-          (/bin/rm -rf /etc.failsafe/ ;
-          /bin/cp -a /etc /etc.failsafe \
-       && /bin/rm -rf $BACKUP_FILELIST \
-       && /bin/mv /tmp/etc.new.$EPOCH/* /etc/ \
-      )&&(/bin/sleep $REBOOT_WAIT \
-       && $REBOOT_CMD & )" \
-       &>$ERRLOG
-  RETVAL=$?
-  [ -z "$(<$ERRLOG)" ] || log $CNAME "ssh: $(<$ERRLOG)"
-  rm -f $ERRLOG
-  [ $RETVAL -ne 0 ] && return $RETVAL
+  try $CNAME "ssh $IPADDR \"    /bin/rm -rf /etc.failsafe/ ;
+                              ( /bin/cp -a /etc /etc.failsafe \
+                                && /bin/rm -rf $BACKUP_FILELIST \
+                                && /bin/mv /tmp/etc.new.$EPOCH/* /etc/ ) \
+                           && ( /bin/sleep $REBOOT_WAIT \
+                                && $REBOOT_CMD & )\" " \
+    || return
 
-  log $CNAME "Done.$([ $REBOOT_CMD != $NO_REBOOT_CMD ] && echo " Rebooting in $REBOOT_WAIT secs...")"
+  log $CNAME "Done.$([ $REBOOT_CMD == $NO_REBOOT_CMD ] || echo " Rebooting in $REBOOT_WAIT secs...")"
 }
 
 confirmConfigToIp () {
@@ -129,132 +125,127 @@ confirmConfigToIp () {
   IPADDR=$2
 
   log $CNAME "Trying to remove /etc.failsafe in $IPADDR ... "
-  ERRLOG="/tmp/ssh.${CNAME////}.$EPOCH"
-  ssh $IPADDR "/bin/rm -rf /etc.failsafe/" 
-    &>$ERRLOG
-  RETVAL=$?
-  [ -z "$(<$ERRLOG)" ] || log $CNAME "ssh: $(<$ERRLOG)"
-  rm -f $ERRLOG
-  [ $RETVAL -ne 0 ] && return $RETVAL
+  try $CNAME "ssh $IPADDR \"/bin/rm -rf /etc.failsafe/\" " \
+    || return
 
   log $CNAME "Done."
 }
 
 statusConfigFromIp () {
-  CNAME="$1"
-  IPADDR="$2"
+  CNAME=$1
+  IPADDR=$2
+  RETVAL=
+  
+  try $CNAME "pullConfigFromIp $CNAME $IPADDR skip_update" >/dev/null \
+    || ( log $CNAME "Down." ; false ) || return
 
-  pullConfigFromIp $CNAME $IPADDR dont_update >/dev/null
-          
-  diff -qr $CNAME/etc $CNAME/etc.$EPOCH &>/dev/null 
-  RETVAL=$?
+  try $CNAME "diff -qr $CNAME/etc $CNAME/etc.$EPOCH" >/dev/null
+    RETVAL=$?
+
   rm -rf $CNAME/etc.$EPOCH
+  
+  case $RETVAL in
+    0) log $CNAME "Reachable and updated." ;;
+    1) log $CNAME "Reachable, with changes pending." ;;
+    *) log $CNAME "Unknown error ($RETVAL) in diff." ;;
+  esac
 }
 
 pullConfigs () {
-
+  ARG=
+  IPADDR=
+  CNAME=
+  
   while [ -n "$1" ]; do
-    ARG="$1"
+    ARG=$1
     shift
   
     case "$ARG" in
-      -i|--ip ) IPADDR="$1" ; shift ;;
+      -i|--ip ) IPADDR=$1 ; shift ;;
       * )
-        CNAME="$ARG"
+        CNAME=$ARG
   
-        if ! [ -d $CNAME ] && [ -z $IPADDR ] ; then 
-	  log $CNAME "Directory not found! Please prepend --ip to specify where to pull from."
-	  continue
-	fi
+        if ! [ -d "$CNAME" ] && [ -z "$IPADDR" ] ; then 
+          log $CNAME "Directory not found! Please prepend --ip to specify where to pull from."
+          continue
+        fi
 	
-        [ -n "$IPADDR" ] || IPADDR=$(getIpFromCname $CNAME)
+        [ -z "$IPADDR" ] && IPADDR=$(getIpFromCname $CNAME)
   
         pullConfigFromIp $CNAME $IPADDR &
         
         unset IPADDR
       ;;
     esac
-  
   done
-
 }
 
 pushConfigs () {
-
+  ARG=
+  IPADDR=
+  CNAME=
+  
   while [ -n "$1" ]; do
-    ARG="$1"
+    ARG=$1
     shift
   
     case "$ARG" in
-      -i|--ip ) IPADDR="$1" ; shift ;;
-      -n|--no-reboot ) REBOOT_CMD="/bin/true" ;;
+      -i|--ip ) IPADDR=$1 ; shift ;;
+      -n|--no-reboot ) REBOOT_CMD=$NO_REBOOT_CMD ;;
       -w|--wait ) 
         if [ -z "${1//[0-9]/}" ] ; then
-          REBOOT_WAIT="$1" ; shift
+          REBOOT_WAIT=$1 ; shift
         else usage "Error: Wait delay must be an integer"
         fi
       ;;
       * )
-        CNAME="$ARG"
+        CNAME=$ARG
   
-        if ! [ -d $CNAME ] ; then log $CNAME "Directory not found. Ignoring host." ; unset IPADDR ; continue ; fi
+        [ -d $CNAME ] || ( log $CNAME "Directory not found. Ignoring host." ; unset IPADDR ; continue )
   
-        [ -n "$IPADDR" ] || IPADDR=$(getIpFromCname $CNAME)
+        [ -z "$IPADDR" ] && IPADDR=$(getIpFromCname $CNAME)
   
         pushConfigToIp $CNAME $IPADDR &
         
         unset IPADDR
       ;;
     esac
-  
   done
-
 }
 
 confirmConfigs () {
-
+  CNAME=
+  IPADDR=
+  
   while [ -n "$1" ]; do
-    ARG="$1"
+    CNAME=$1
     shift
   
-    case "$ARG" in
-      * )
-        CNAME="$ARG"
-        
-        if ! [ -d $CNAME ] ; then log $CNAME "Directory not found. Ignoring host." ; continue ; fi
-        
-        IPADDR=$(getIpFromCname $CNAME)
-  
-        confirmConfigToIp $CNAME $IPADDR &
-      ;;
-    esac
-  
-  done
+    [ -d $CNAME ] || ( log $CNAME "Directory not found. Ignoring host." ; continue )
+    
+    IPADDR=$(getIpFromCname $CNAME)
 
+    confirmConfigToIp $CNAME $IPADDR &
+  done
 }
 
 statusConfigs () {
-
+  CNAME=
+  IPADDR=
+  
   while [ -n "$1" ]; do
-    CNAME="$1"
+    CNAME=$1
     shift
 
-    if ! [ -d $CNAME ] ; then log $CNAME "Directory not found. Ignoring host." ; continue ; fi
+    [ -d $CNAME ] || ( log $CNAME "Directory not found. Ignoring host." ; continue )
     
     IPADDR=$(getIpFromCname $CNAME)
     
-    statusConfigFromIp $CNAME $IPADDR 
-    
-    case $RETVAL in
-      0) log $CNAME "Reachable and updated." ;;
-      1) log $CNAME "Reachable, with changes pending." ;;
-      *) log $CNAME "Down." ;;
-    esac
+    statusConfigFromIp $CNAME $IPADDR &
   done
-
 }
 
-export ACTION="$1"
+export ACTION=$1
 shift
 
 export LOGFILE=/tmp/$0-$ACTION.log
