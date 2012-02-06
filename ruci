@@ -1,40 +1,68 @@
 #!/bin/bash
 #
-#
+# Dependencias locales y remotas: ssh, scp, tar 
+#   solo locales: uci, hg
+### 
+### Usage: $0 push [--no-reboot] [--wait secs] [--ip <host>] NAME [[--ip <host>] NAME] ...
+###        $0 pull [--ip <host>] NAME [[--ip <host>] NAME] ...
+###        $0 confirm NAME [NAME] ...
+### 
+### Manage remote uci configuration in NAME(s)
+### 
+###  -w, --wait NUM	  After applying configuration, wait for NUM seconds
+###                     before reboot.
+###  -i, --ip HOST		Push the configuration to specified IP or host.
+###                     Applies only to the next NAME specified in command line.
+###  -n, --no-reboot	Prevent rebooting after pushing and applying configuration.
+### 
 
 REBOOT_WAIT=300 # in seconds
-BACKUP_FILELIST="/etc/config/ /etc/dropbear/ /etc/firewall.user /etc/group /etc/hosts /etc/inittab /etc/passwd /etc/profile /etc/rc.local /etc/shadow /etc/shells /etc/sysctl.conf"
+BACKUP_FILELIST="/etc/config/ /etc/dropbear/ /etc/crontabs/ /etc/firewall.user /etc/group /etc/hosts /etc/inittab /etc/passwd /etc/profile /etc/rc.local /etc/shadow /etc/shells /etc/sysctl.conf"
 
 REBOOT_CMD="/sbin/reboot"
 NO_REBOOT_CMD="/bin/true"
 EPOCH=$(date +%s)
 
 usage () {
-  cat << EOF
-
-Usage: $0 push [--no-reboot] [--wait secs] [--ip dest-ip] NAME [[--ip dest-ip] NAME] ...
-       $0 pull [--ip dest-ip] NAME [[--ip dest-ip] NAME] ...
-       $0 confirm NAME [NAME] ...
-
-Manage remote uci configuration in NAME(s)
-
-  -w, --wait NUM	After writing configuration, wait for NUM seconds
-  				before reboot.
-  -i, --ip HOST		Push the configuration to specified IP or host.
-  				Applies only to the next NAME specified in command line.
-  -n, --no-reboot	Prevent rebooting after apply
-
-EOF
+  [ -n "$1" ] && echo "$*"
+  sed -n "/^### /{s///;p}" $0
   exit 1
 }
 
 getIpFromCname () {
-  CNAME=$1
+  CNAME="$1"
 
   /home/guido/src/uci/uci -c $CNAME/etc/config/ get network.lan.ipaddr
 
   ### TODO: reimplementar sin usar uci,
   ###       usando bash + sed
+}
+
+pullConfigFromIp () {
+  CNAME="$1"
+  IPADDR="$2"
+
+  if ! [ -z "$(hg st $CNAME)" ] ; then
+    log $CNAME "Directory contains uncommited changes. Autocommiting..."
+    hg commit -A -m "Autocommit before pulling from $IPADDR" $CNAME 
+  fi
+
+  
+  log $CNAME "Pulling config from $IPADDR ... "
+  ERRLOG="/tmp/ssh.${CNAME////}.$EPOCH"
+  mkdir -p $CNAME/etc.$EPOCH/
+  ssh $IPADDR "/bin/tar czf - $BACKUP_FILELIST" 2>$ERRLOG | tar xzf - -C $CNAME/etc.$EPOCH 
+  RETVAL=$?
+  rmdir --ignore-fail-on-non-empty $CNAME/etc.$EPOCH/
+  [ -z "$(<$ERRLOG)" ] || log $CNAME "ssh: $(<$ERRLOG)"
+  rm -f $ERRLOG
+  [ $RETVAL -ne 0 ] && return
+
+  rm -rf $CNAME/etc
+  mv $CNAME/etc.$EPOCH $CNAME/etc
+
+  log $CNAME "Done."
+  
 }
 
 pushConfigToIp () {
@@ -46,51 +74,43 @@ pushConfigToIp () {
   scp -pr $CNAME/etc $IPADDR:/tmp/etc.new.$EPOCH \
     >/dev/null 2>$ERRLOG
   RETVAL=$?
-  log $CNAME "scp: $(<$ERRLOG)"
+  [ -z "$(<$ERRLOG)" ] || log $CNAME "scp: $(<$ERRLOG)"
+  rm -f $ERRLOG
   [ $RETVAL -ne 0 ] && return
   
 
   log $CNAME "Config sent. Applying changes..."
   ERRLOG="/tmp/ssh.${CNAME////}.$EPOCH"
   ssh $IPADDR "
-          (/bin/rm -r /etc.failsafe/ 2>/dev/null ;
+          (/bin/rm -rf /etc.failsafe/ ;
           /bin/cp -a /etc /etc.failsafe \
-       && /bin/rm -r $BACKUP_FILELIST \
+       && /bin/rm -rf $BACKUP_FILELIST \
        && /bin/mv /tmp/etc.new.$EPOCH/* /etc/ \
       )&&(/bin/sleep $REBOOT_WAIT \
        && $REBOOT_CMD & )" \
-       >/dev/null 2>$ERRLOG
+       &>$ERRLOG
   RETVAL=$?
-  [ -s $ERRLOG ] && log $CNAME "ssh: $(<$ERRLOG)"
+  [ -z "$(<$ERRLOG)" ] || log $CNAME "ssh: $(<$ERRLOG)"
+  rm -f $ERRLOG
   [ $RETVAL -ne 0 ] && return
 
   log $CNAME "Done.$([ $REBOOT_CMD != $NO_REBOOT_CMD ] && echo " Rebooting in $REBOOT_WAIT secs...")"
 }
 
-pullConfigFromIp () {
+confirmConfigToIp () {
   CNAME=$1
   IPADDR=$2
 
-  if ! [ -z "$(hg st $CNAME)" ] ; then
-    log $CNAME "Directory contains uncommited changes. Autocommiting..."
-    hg commit -A -m "Autocommit before pulling from $IPADDR" $CNAME 
-  fi
-
-  
-  log $CNAME "Pulling config with scp from $IPADDR ... "
-  ERRLOG="/tmp/scp.${CNAME////}.$EPOCH"
-  mkdir -p $CNAME/etc.$EPOCH/
-  scp -pr $IPADDR:"$BACKUP_FILELIST" $CNAME/etc.$EPOCH/ >/dev/null 2>$ERRLOG 
+  log $CNAME "Trying to remove /etc.failsafe in $IPADDR ... "
+  ERRLOG="/tmp/ssh.${CNAME////}.$EPOCH"
+  ssh $IPADDR "/bin/rm -rf /etc.failsafe/" 
+    &>$ERRLOG
   RETVAL=$?
-  rmdir --ignore-fail-on-non-empty $CNAME/etc.$EPOCH/
-  [ -s $ERRLOG ] && log $CNAME "scp: $(<$ERRLOG)"
+  [ -z "$(<$ERRLOG)" ] || log $CNAME "ssh: $(<$ERRLOG)"
+  rm -f $ERRLOG
   [ $RETVAL -ne 0 ] && return
 
-  [ -d $CNAME/etc ] && rm -r $CNAME/etc
-  mv $CNAME/etc.$EPOCH $CNAME/etc
-
   log $CNAME "Done."
-  
 }
 
 tstamp () {
@@ -100,53 +120,23 @@ tstamp () {
 log () {
   CNAME="$1"
   TEXT="$2"
-  echo "[$CNAME] $(tstamp): $TEXT"
+  echo "[$CNAME] $(tstamp): $TEXT" | tee -a $LOGFILE
 }
  
-pushConfigs () {
-
-  [ $# -eq 0 ] && usage
-
-  until [ $# -eq 0 ] ; do
-    ARG="$1"
-    shift
-  
-    case "$ARG" in
-      -i|--ip ) IPADDR=$1 ; shift ;;
-      -w|--wait ) if [ -z "${1//[0-9]/}" ] ; then REBOOT_WAIT=$1 ; shift ; else usage ; fi ;;
-      -n|--no-reboot ) REBOOT_CMD="/bin/true" ;;
-      * )
-        CNAME="$ARG"
-  
-        if ! [ -d $CNAME ] ; then log $CNAME "Directory doesn't exist!" ; unset IPADDR ; continue ; fi
-  
-        [ -n "$IPADDR" ] || IPADDR=$(getIpFromCname $CNAME)
-  
-        pushConfigToIp $CNAME $IPADDR &
-        
-        unset IPADDR
-      ;;
-    esac
-  
-  done
-
-}
-
 pullConfigs () {
+  [ -n "$1" ] || usage "Error: No NAME(s) specified on command line."
 
-  [ $# -eq 0 ] && usage
-
-  until [ $# -eq 0 ] ; do
+  while [ -n "$1" ]; do
     ARG="$1"
     shift
   
     case "$ARG" in
-      -i|--ip ) IPADDR=$1 ; shift ;;
+      -i|--ip ) IPADDR="$1" ; shift ;;
       * )
         CNAME="$ARG"
   
         if ! [ -d $CNAME ] && [ -z $IPADDR ] ; then 
-	  log $CNAME "Directory doesn't exist! Please prepend --ip to specify where to pull from."
+	  log $CNAME "Directory not found! Please prepend --ip to specify where to pull from."
 	  continue
 	fi
 	
@@ -162,28 +152,80 @@ pullConfigs () {
 
 }
 
+pushConfigs () {
+  [ -n "$1" ] || usage "Error: No NAME(s) specified on command line."
+
+  while [ -n "$1" ]; do
+    ARG="$1"
+    shift
+  
+    case "$ARG" in
+      -i|--ip ) IPADDR="$1" ; shift ;;
+      -n|--no-reboot ) REBOOT_CMD="/bin/true" ;;
+      -w|--wait ) 
+        if [ -z "${1//[0-9]/}" ] ; then
+          REBOOT_WAIT="$1" ; shift
+        else usage "Error: Wait delay must be an integer"
+        fi
+      ;;
+      * )
+        CNAME="$ARG"
+  
+        if ! [ -d $CNAME ] ; then log $CNAME "Directory not found. Ignoring host." ; unset IPADDR ; continue ; fi
+  
+        [ -n "$IPADDR" ] || IPADDR=$(getIpFromCname $CNAME)
+  
+        pushConfigToIp $CNAME $IPADDR &
+        
+        unset IPADDR
+      ;;
+    esac
+  
+  done
+
+}
+
 confirmConfigs () {
-  # TODO , ssh $1 "rm -r /etc.failsafe"
+  [ -n "$1" ] || usage "Error: No NAME(s) specified on command line."
+
+  while [ -n "$1" ]; do
+    ARG="$1"
+    shift
+  
+    case "$ARG" in
+      * )
+        CNAME="$ARG"
+        
+        if ! [ -d $CNAME ] ; then log $CNAME "Directory not found. Ignoring host." ; continue ; fi
+        
+        IPADDR=$(getIpFromCname $CNAME)
+  
+        confirmConfigToIp $CNAME $IPADDR &
+      ;;
+    esac
+  
+  done
+
+}
+
+statusConfigs () {
   exit 1
 }
 
-case $1 in
-  push )
-    shift
-    pushConfigs $*
-  ;;
-  pull )
-    shift
-    pullConfigs $*
-  ;;
-  confirm )
-    shift
-    confirmConfigs $*
-  ;;
-  * )
-    usage
-  ;;
+export ACTION="$1"
+
+export LOGFILE=/tmp/$0-$ACTION.log
+rm -f $LOGFILE
+
+case $ACTION in
+  pull ) shift ; pullConfigs "$*" ;;
+  push ) shift ; pushConfigs "$*" ;;
+  confirm ) shift ; confirmConfigs "$*" ;;
+  status ) shift ; statusConfigs "$*" ;;
+  "" ) usage ;;
+  * ) usage "Error: Unknown action \"$ACTION\"" ;;
 esac
 
-log "*" "All jobs started."
+log "*" "All jobs started. Sorted logfile will be written to $LOGFILE"
 wait
+sort $LOGFILE | tee $LOGFILE &>/dev/null
