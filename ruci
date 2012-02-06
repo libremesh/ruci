@@ -49,7 +49,10 @@ log () {
   shift
   TEXT="$*"
   
-  echo "$TEXT" | sed "s|^|[$CNAME] $(tstamp): |" | tee -a $LOGFILE
+  echo "$TEXT" \
+    | sed "/tar: removing leading ... from member/d" \
+    | sed "s|^|[$CNAME] $(tstamp): |" \
+    | tee -a $LOGFILE
 }
  
 try () {
@@ -83,7 +86,7 @@ pullConfigFromIp () {
   fi
 
   log $CNAME "Pulling config from $IPADDR ..."
-  try $CNAME "ssh $IPADDR \"/bin/tar czf - $BACKUP_FILELIST 2>/dev/null\" >$CNAME/etc.$EPOCH.tar.gz" \
+  try $CNAME "ssh $IPADDR \"/bin/tar czf - $BACKUP_FILELIST \" >$CNAME/etc.$EPOCH.tar.gz" \
     || (RETVAL=$? ; rm -f $CNAME/etc.$EPOCH.tar.gz ; false) || return $RETVAL
   
   mkdir -p $CNAME/etc.$EPOCH/
@@ -280,5 +283,5 @@ esac
 
 log "*" "All jobs started. Sorted logfile will be written to $LOGFILE"
 wait
-sort $LOGFILE > $LOGFILE.sort
+sort $LOGFILE | sed "/\(Pulling\|Sending\|Trying\)/s/^/\n/" > $LOGFILE.sort
 mv -f $LOGFILE.sort $LOGFILE
