@@ -85,11 +85,12 @@ pullConfigFromIp () {
       || return
   fi
 
+  mkdir -p $CNAME/etc.$EPOCH/
+
   log $CNAME "Pulling config from $IPADDR ..."
   try $CNAME "ssh $IPADDR \"/bin/tar czf - $BACKUP_FILELIST \" >$CNAME/etc.$EPOCH.tar.gz" \
-    || (RETVAL=$? ; rm -f $CNAME/etc.$EPOCH.tar.gz ; false) || return $RETVAL
+    || (RETVAL=$? ; rm -rf $CNAME/etc.$EPOCH{/,.tar.gz} ; false) || return $RETVAL
   
-  mkdir -p $CNAME/etc.$EPOCH/
   try $CNAME "tar xzf $CNAME/etc.$EPOCH.tar.gz --xform \"s-^etc/--\" -C $CNAME/etc.$EPOCH" \
     || (RETVAL=$? ; rm -rf $CNAME/etc.$EPOCH{/,.tar.gz} ; false) || return $RETVAL
 
