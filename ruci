@@ -20,14 +20,19 @@
 #
 
 export REBOOT_WAIT=300  # in seconds
-export BACKUP_FILELIST="/etc/config/ /etc/dropbear/ /etc/crontabs/ /etc/firewall.user /etc/group /etc/hosts /etc/inittab /etc/passwd /etc/profile /etc/rc.local /etc/shadow /etc/shells /etc/sysctl.conf"
+if [ -z "$BACKUP_FILELIST" ] ; then
+  export BACKUP_FILELIST="/etc/config/ /etc/dropbear/ /etc/crontabs/ /etc/firewall.user /etc/group /etc/hosts /etc/inittab /etc/passwd /etc/profile /etc/rc.local /etc/shadow /etc/shells /etc/sysctl.conf"
+  export BACKUP_FILELIST="$BACKUP_FILELIST /etc/bat-hosts"
+else
+  echo "************ WARNING: Using filelist \"$BACKUP_FILELIST\""
+fi
 export REBOOT_CMD="/sbin/reboot"
 export NO_REBOOT_CMD="/bin/true"
 export EPOCH=$(date +%s)
 
 usage () {
   [ -n "$1" ] && echo "$*"
-  sed -n "/^### /{s///;p}" $0
+  sed -n "/^### /{s///;s|\$0|$0|g;p}" $0
   exit 1
 }
 
@@ -108,10 +113,7 @@ pushConfigToIp () {
   CNAME=${1:?}
   IPADDR=${2:?}
   RETVAL=
-  
-  log $CNAME "Sending config with scp to $IPADDR ... "
-  try $CNAME "scp -pr $CNAME/etc $IPADDR:/tmp/etc.new.$EPOCH >/dev/null" \
-    || return
+  BACKUP_FILES=
   
   try $CNAME "ssh $IPADDR /bin/sh -c \'[ -d /etc.failsafe-to-apply/ ]\' "
     RETVAL=$?
@@ -119,7 +121,17 @@ pushConfigToIp () {
       log $CNAME "Previous push hasn't been confirmed yet. Use \`$0 confirm $CNAME\` first. Skipping..." 
       return
     fi
-    
+  
+  for file in $BACKUP_FILELIST; do
+    BACKUP_FILES="$BACKUP_FILES $CNAME/$file"
+  done
+  
+  log $CNAME "Sending config with scp to $IPADDR ... "
+  try $CNAME "ssh $IPADDR \"/bin/mkdir -p /tmp/etc.new.$EPOCH\" " \
+    || return
+  try $CNAME "scp -pr $BACKUP_FILES $IPADDR:/tmp/etc.new.$EPOCH/ >/dev/null" \
+    || return
+  
   log $CNAME "Config sent. Applying changes..."
   try $CNAME "ssh $IPADDR \"    /bin/rm -rf /etc.failsafe/ ;
                               ( /bin/cp -a /etc /etc.failsafe \
@@ -154,6 +166,9 @@ statusConfigFromIp () {
 
   try $CNAME "ssh $IPADDR /bin/sh -c \'[ -d /etc.failsafe-to-apply/ ]\' " \
     && STATUSMSG=" Counting down to revert-to-failsafe. Use \`$0 confirm $CNAME\`."
+    
+  try $CNAME "ssh $IPADDR /bin/sh -c \'[ -d /etc.failsafe/ ]\' " \
+    && STATUSMSG=" Found /etc.failsafe."
     
   try $CNAME "diff -qr $CNAME/etc $CNAME/etc.$EPOCH" >/dev/null
     RETVAL=$?
