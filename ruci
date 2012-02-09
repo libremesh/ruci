@@ -2,6 +2,25 @@
 #
 # Dependencias locales y remotas: ssh, scp, tar 
 #   solo locales: uci, hg
+#
+#
+#       Copyleft 2012 Guido Iribarren <guidoiribarren@buenosaireslibre.org>
+#       
+#       This program is free software; you can redistribute it and/or modify
+#       it under the terms of the GNU General Public License as published by
+#       the Free Software Foundation; either version 2 of the License, or
+#       (at your option) any later version.
+#       
+#       This program is distributed in the hope that it will be useful,
+#       but WITHOUT ANY WARRANTY; without even the implied warranty of
+#       MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#       GNU General Public License for more details.
+#       
+#       You should have received a copy of the GNU General Public License
+#       along with this program; if not, write to the Free Software
+#       Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
+#       MA 02110-1301, USA.
+#
 ### 
 ### Usage: $0 push [--no-reboot] [--wait secs] [--ip <host>] NAME [[--ip <host>] NAME] ...
 ###        $0 pull [--ip <host>] NAME [[--ip <host>] NAME] ...
@@ -19,20 +38,24 @@
 #
 #
 
-export REBOOT_WAIT=300  # in seconds
+export REBOOT_WAIT=15  # in seconds
 if [ -z "$BACKUP_FILELIST" ] ; then
   export BACKUP_FILELIST="/etc/config/ /etc/dropbear/ /etc/crontabs/ /etc/firewall.user /etc/group /etc/hosts /etc/inittab /etc/passwd /etc/profile /etc/rc.local /etc/shadow /etc/shells /etc/sysctl.conf"
   export BACKUP_FILELIST="$BACKUP_FILELIST /etc/bat-hosts"
 else
   echo "************ WARNING: Using filelist \"$BACKUP_FILELIST\""
 fi
+if [ -z "$ETC_FAILSAFE" ] ; then
+  export ETC_FAILSAFE="/etc.failsafe-to-apply/"
+fi
 export REBOOT_CMD="/sbin/reboot"
 export NO_REBOOT_CMD="/bin/true"
 export EPOCH=$(date +%s)
+export CMDNAME=$(basename $0)
 
 usage () {
   [ -n "$1" ] && echo "$*"
-  sed -n "/^### /{s///;s|\$0|$0|g;p}" $0
+  sed -n "/^### /{s///;s|\$0|$CMDNAME|g;p}" $0
   exit 1
 }
 
@@ -148,8 +171,8 @@ confirmConfigToIp () {
   CNAME=${1:?}
   IPADDR=${2:?}
 
-  log $CNAME "Trying to remove /etc.failsafe-to-apply in $IPADDR ... "
-  try $CNAME "ssh $IPADDR \"/bin/rm -rf /etc.failsafe-to-apply/\" " \
+  log $CNAME "Trying to remove ${ETC_FAILSAFE:?} in $IPADDR ... "
+  try $CNAME "ssh $IPADDR \"/bin/rm -rfv ${ETC_FAILSAFE:?}\" " \
     || return
 
   log $CNAME "Done."
@@ -282,7 +305,7 @@ statusConfigs () {
 export ACTION=$1
 shift
 
-export LOGFILE=/tmp/$0-$ACTION.log
+export LOGFILE=/tmp/$CMDNAME-$ACTION.log
 rm -f $LOGFILE
 
 case $ACTION in
