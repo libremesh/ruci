@@ -53,6 +53,11 @@ export NO_REBOOT_CMD="/bin/true"
 export EPOCH=$(date +%s)
 export CMDNAME=$(basename $0)
 
+export CNAMES_PUSHED=/tmp/ruci.pushed
+export CNAMES_DIRTY=/tmp/ruci.dirty
+cat /dev/null >"${CNAMES_PUSHED:?}"
+cat /dev/null >"${CNAMES_DIRTY:?}"
+
 usage () {
   [ -n "$1" ] && echo "$*"
   sed -n "/^### /{s///;s|\$0|$CMDNAME|g;p}" $0
@@ -165,6 +170,7 @@ pushConfigToIp () {
     || return
 
   log $CNAME "Done.$([ $REBOOT_CMD == $NO_REBOOT_CMD ] || echo " Rebooting in $REBOOT_WAIT secs...")"
+  echo -n " $CNAME" >> "$CNAMES_PUSHED"
 }
 
 confirmConfigToIp () {
@@ -188,7 +194,8 @@ statusConfigFromIp () {
     || ( log $CNAME "$IPADDR Down." ; false ) || return
 
   try $CNAME "ssh $IPADDR /bin/sh -c \'[ -d /etc.failsafe-to-apply/ ]\' " \
-    && STATUSMSG=" Counting down to revert-to-failsafe. Use \`$0 confirm $CNAME\`."
+    && STATUSMSG=" Counting down to revert-to-failsafe. Use \`$0 confirm $CNAME\`." \
+    && echo -n " $CNAME" >> "$CNAMES_PUSHED"
     
   try $CNAME "ssh $IPADDR /bin/sh -c \'[ -d /etc.failsafe/ ]\' " \
     && STATUSMSG=" Found /etc.failsafe."
@@ -200,7 +207,8 @@ statusConfigFromIp () {
   
   case $RETVAL in
     0) log $CNAME "$IPADDR Reachable and updated.$STATUSMSG" ;;
-    1) log $CNAME "$IPADDR Reachable, with changes pending.$STATUSMSG" ;;
+    1) log $CNAME "$IPADDR Reachable, with changes pending.$STATUSMSG"
+       echo -n "|$CNAME" >> "$CNAMES_DIRTY" ;;
     *) log $CNAME "Unknown error ($RETVAL) in diff.$STATUSMSG" ;;
   esac
 }
@@ -324,3 +332,14 @@ log "*" "All jobs started. Sorted logfile will be written to $LOGFILE"
 wait
 sort $LOGFILE | sed "/\(Pulling\|Sending\|Trying\)/s/^/\n/" > $LOGFILE.sort
 mv -f $LOGFILE.sort $LOGFILE
+
+echo
+if [ -s "$CNAMES_DIRTY" ] ; then
+  egrep "($(cat $CNAMES_DIRTY |sed 's/^|//'))" $LOGFILE
+  rm -rf "${CNAMES_DIRTY:?}"
+fi
+
+if [ -s "$CNAMES_PUSHED" ] ; then
+  echo "Don't forget to run \`$CMDNAME confirm $(<$CNAMES_PUSHED)\`"
+  rm -rf "${CNAMES_PUSHED:?}"
+fi
