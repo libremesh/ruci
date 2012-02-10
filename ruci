@@ -67,7 +67,7 @@ usage () {
 getIpFromCname () {
   CNAME=${1:?}
 
-  /home/guido/src/uci/uci -c $CNAME/etc/config/ get network.lan.ipaddr
+  uci -c $CNAME/etc/config/ get network.lan.ipaddr
 
   ### TODO: reimplementar sin usar uci,
   ###       usando bash + sed
