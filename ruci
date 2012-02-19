@@ -38,7 +38,8 @@
 #
 #
 
-export REBOOT_WAIT=15  # in seconds
+export REBOOT_WAIT=15  # in seconds #DEPRECATED
+export TIMEOUT=15  # in seconds
 if [ -z "$BACKUP_FILELIST" ] ; then
   export BACKUP_FILELIST="/etc/config/ /etc/dropbear/ /etc/crontabs/ /etc/firewall.user /etc/group /etc/hosts /etc/inittab /etc/passwd /etc/profile /etc/rc.local /etc/shadow /etc/shells /etc/sysctl.conf"
   export BACKUP_FILELIST="$BACKUP_FILELIST /etc/bat-hosts"
@@ -50,6 +51,12 @@ if [ -z "$ETC_FAILSAFE" ] ; then
 fi
 export REBOOT_CMD="/sbin/reboot"
 export NO_REBOOT_CMD="/bin/true"
+export SSH_PERSIST="-o \"ControlMaster auto\" 
+                    -o \"ControlPath /tmp/ruci_ssh_%r@%h:%p\"
+                    -o \"ControlPersist 600\"
+                    -o \"ServerAliveInterval 10\"
+                    -o \"ConnectTimeout 20\"
+                   "
 export EPOCH=$(date +%s)
 export CMDNAME=$(basename $0)
 
@@ -112,7 +119,7 @@ pullConfigFromIp () {
   
   RETVAL=
   
-  if [ -z "$SKIP_UPDATE" ] && [ -n "$(hg status $CNAME)" ] ; then
+  if [ -d "$CNAME" ] && [ -z "$SKIP_UPDATE" ] && [ -n "$(hg status $CNAME)" ] ; then
     log $CNAME "Directory contains uncommited changes. Autocommiting..."
     try $CNAME "hg commit -A -m \"Autocommit before pulling from $IPADDR\" $CNAME" \
       || return
@@ -121,7 +128,8 @@ pullConfigFromIp () {
   mkdir -p $CNAME/etc.$EPOCH/
 
   log $CNAME "Pulling config from $IPADDR ..."
-  try $CNAME "ssh $IPADDR \"/bin/tar czf - $BACKUP_FILELIST \" >$CNAME/etc.$EPOCH.tar.gz" \
+  try $CNAME "ssh $IPADDR \"/bin/ls -1d $BACKUP_FILELIST 2>/dev/null \
+                            | /usr/bin/xargs /bin/tar czf - \" >$CNAME/etc.$EPOCH.tar.gz" \
     || (RETVAL=$? ; rm -rf $CNAME/etc.$EPOCH{/,.tar.gz} ; false) || return $RETVAL
   
   try $CNAME "tar xzf $CNAME/etc.$EPOCH.tar.gz --xform \"s-^etc/--\" -C $CNAME/etc.$EPOCH" \
@@ -246,6 +254,10 @@ pushConfigs () {
   ARG=
   IPADDR=
   CNAME=
+  
+  # Check repo clean
+  # Open ssh persistent connection
+  # 
   
   while [ -n "$1" ]; do
     ARG=$1
