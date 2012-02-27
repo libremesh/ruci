@@ -51,14 +51,14 @@ if [ -z "$ETC_FAILSAFE" ] ; then
 fi
 export REBOOT_CMD="/sbin/reboot"
 export NO_REBOOT_CMD="/bin/true"
-export SSH_PERSIST="-o \"ControlMaster auto\" 
-                    -o \"ControlPath /tmp/ruci_ssh_%r@%h:%p\"
-                    -o \"ControlPersist 600\"
+export CMDNAME="$(basename "$0")"
+export SSH_PERSIST="ssh -o \"ControlMaster auto\" 
+                    -o \"ControlPath /tmp/$CMDNAME_ssh_%r@%h:%p\"
+                    -o \"ControlPersist 60\"
                     -o \"ServerAliveInterval 10\"
                     -o \"ConnectTimeout 20\"
                    "
 export EPOCH="$(date +%s)"
-export CMDNAME="$(basename "$0")"
 
 export CNAMES_PUSHED="/tmp/ruci.pushed"
 export CNAMES_DIRTY="/tmp/ruci.dirty"
@@ -130,10 +130,10 @@ pullConfigFromIp () {
   log "$CNAME" "Pulling config from $IPADDR ..."
   try "$CNAME" "ssh $IPADDR \"/bin/ls -1d $BACKUP_FILELIST 2>/dev/null \
                             | /usr/bin/xargs /bin/tar czf - \" >$CNAME/etc.$EPOCH.tar.gz" \
-    || { RETVAL=$? ; rm -rf "$CNAME/etc.$EPOCH{/,.tar.gz}" ; return $RETVAL ; }
+    || { RETVAL=$? ; rm -rf "$CNAME/etc.$EPOCH"{/,.tar.gz} ; return $RETVAL ; }
   
   try "$CNAME" "tar xzf $CNAME/etc.$EPOCH.tar.gz --xform \"s-^etc/--\" -C $CNAME/etc.$EPOCH" \
-    || { RETVAL=$? ; rm -rf "$CNAME/etc.$EPOCH{/,.tar.gz}" ; return $RETVAL ; }
+    || { RETVAL=$? ; rm -rf "$CNAME/etc.$EPOCH"{/,.tar.gz} ; return $RETVAL ; }
 
   rm -rf "$CNAME/etc.$EPOCH.tar.gz"
 
@@ -255,10 +255,6 @@ pushConfigs () {
   IPADDR=
   CNAME=
   
-  # Check repo clean
-  # Open ssh persistent connection
-  # 
-  
   while [ -n "$1" ]; do
     ARG="$1"
     shift
@@ -330,7 +326,7 @@ rm -f "$LOGFILE"
 
 case "$ACTION" in
   pull | push | confirm ) 
-    [ -z "$@" ] && usage "Error: No NAME(s) specified on command line."
+    [ -z "$*" ] && usage "Error: No NAME(s) specified on command line."
     ${ACTION}Configs "$@"
   ;;
   status )
