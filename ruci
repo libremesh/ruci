@@ -207,8 +207,8 @@ statusConfigFromIp () {
     && STATUSMSG=" Counting down to revert-to-failsafe. Use \`$0 confirm $CNAME\`." \
     && echo -n " $CNAME" >> "$CNAMES_PUSHED"
     
-  try "$CNAME" "cd \"$CNAME\" ; find -L \"$DIR_OVERLAY\" \"$DIR_PULL_TMP/$DIR_OVERLAY\" -type l -printf \"%f\n\"\
-                | diff -X - -qr \"$DIR_OVERLAY\" \"$DIR_PULL_TMP/$DIR_OVERLAY\"" >/dev/null
+  try "$CNAME" "diff -q . . ; ( cd \"$CNAME\" ; find -L \"$DIR_OVERLAY\" \"$DIR_PULL_TMP/$DIR_OVERLAY\" -type l -printf \"%f\n\"\
+                | diff -X - -qr \"$DIR_OVERLAY\" \"$DIR_PULL_TMP/$DIR_OVERLAY\" ) " >/dev/null
     RETVAL=$?
 
   rm -rf "$CNAME/$DIR_PULL_TMP"
