@@ -152,7 +152,7 @@ pullConfigFromIp () {
   mkdir -p "$CNAME/$DIR_PULL_TMP"
 
   log "$CNAME" "Pulling $DIR_OVERLAY from $IPADDR ..."
-  try "$CNAME" "ssh $IPADDR \"$TAR -c -f - /$DIR_OVERLAY \" >$CNAME/$DIR_PULL_TMP.tar" \
+  try "$CNAME" "$SSH_PERSIST $IPADDR \"$TAR -c -f - /$DIR_OVERLAY \" >$CNAME/$DIR_PULL_TMP.tar" \
     || { RETVAL=$? ; rm -rf "$CNAME/$DIR_PULL_TMP"{/,.tar} ; return $RETVAL ; }
   
   try "$CNAME" "$TAR -x -f $CNAME/$DIR_PULL_TMP.tar -C $CNAME/$DIR_PULL_TMP" \
@@ -175,7 +175,7 @@ pushConfigToIp () {
   RETVAL=
   BACKUP_FILES=
   
-  try "$CNAME" "ssh $IPADDR /bin/sh -c \'[ -d /etc.failsafe-to-apply/ ]\' "
+  try "$CNAME" "$SSH_PERSIST $IPADDR /bin/sh -c \'[ -d /etc.failsafe-to-apply/ ]\' "
     RETVAL=$?
     if [ $RETVAL -eq 0 ] ; then
       log "$CNAME" "Previous push hasn't been confirmed yet. Use \`$0 confirm $CNAME\` first. Skipping..." 
@@ -187,13 +187,13 @@ pushConfigToIp () {
   done
   
   log "$CNAME" "Sending config with scp to $IPADDR ... "
-  try "$CNAME" "ssh $IPADDR \"/bin/mkdir -p /tmp/etc.new.$EPOCH\" " \
+  try "$CNAME" "$SSH_PERSIST $IPADDR \"/bin/mkdir -p /tmp/etc.new.$EPOCH\" " \
     || return
   try "$CNAME" "scp -pr $BACKUP_FILES $IPADDR:/tmp/etc.new.$EPOCH/ >/dev/null" \
     || return
   
   log "$CNAME" "Config sent. Applying changes..."
-  try "$CNAME" "ssh $IPADDR \"    /bin/rm -rf /etc.failsafe/ ;
+  try "$CNAME" "$SSH_PERSIST $IPADDR \"    /bin/rm -rf /etc.failsafe/ ;
                               ( /bin/cp -a /etc /etc.failsafe \
                                 && /bin/rm -rf $BACKUP_FILELIST \
                                 && /bin/mv /tmp/etc.new.$EPOCH/* /etc/ ) \
@@ -212,7 +212,7 @@ confirmConfigToIp () {
   IPADDR="${2:?}"
 
   log "$CNAME" "Trying to remove $ETC_FAILSAFE in $IPADDR ... "
-  try "$CNAME" "ssh $IPADDR \"/bin/rm -rfv ${ETC_FAILSAFE:?}\" " \
+  try "$CNAME" "$SSH_PERSIST $IPADDR \"/bin/rm -rfv ${ETC_FAILSAFE:?}\" " \
     || return
 
   log "$CNAME" "Done."
@@ -227,7 +227,7 @@ statusConfigFromIp () {
   try "$CNAME" "pullConfigFromIp \"$CNAME\" \"$IPADDR\" skip_update" >/dev/null \
     || { log "$CNAME" "$IPADDR Down." ; return ; }
 
-  try "$CNAME" "ssh $IPADDR /bin/sh -c \'[ -d $ETC_FAILSAFE ]\' " \
+  try "$CNAME" "$SSH_PERSIST $IPADDR /bin/sh -c \'[ -d $ETC_FAILSAFE ]\' " \
     && STATUSMSG=" Counting down to revert-to-failsafe. Use \`$0 confirm $CNAME\`." \
     && echo -n " $CNAME" >> "$CNAMES_PUSHED"
     
@@ -343,13 +343,13 @@ pushConfigsSafe () {
         done
         
         log "$CNAME" "Sending config with scp to $IPADDR ... "
-        try "$CNAME" "ssh $IPADDR \"/bin/mkdir -p /tmp/etc.new.$EPOCH\" " \
+        try "$CNAME" "$SSH_PERSIST $IPADDR \"/bin/mkdir -p /tmp/etc.new.$EPOCH\" " \
           || return
         try "$CNAME" "scp -pr $BACKUP_FILES $IPADDR:/tmp/etc.new.$EPOCH/ >/dev/null" \
           || return
         
         log "$CNAME" "Config sent. Applying changes..."
-        try "$CNAME" "ssh $IPADDR \"    /bin/rm -rf $ETC_FAILSAFE ;
+        try "$CNAME" "$SSH_PERSIST $IPADDR \"    /bin/rm -rf $ETC_FAILSAFE ;
                                     ( /bin/cp -a /etc $ETC_FAILSAFE \
                                       && /bin/rm -rf $BACKUP_FILELIST \
                                       && /bin/mv /tmp/etc.new.$EPOCH/* /etc/ ) \
