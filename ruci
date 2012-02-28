@@ -232,9 +232,9 @@ pullConfigs () {
       -i|--ip ) IPADDR="$1" ; shift ;;
       * )
         CNAME="$ARG"
-  
-        if ! [ -d "$CNAME" ] && [ -z "$IPADDR" ] ; then 
-          log "$CNAME" "Directory not found! Please prepend --ip to specify where to pull from."
+
+        if ! [ -d "$CNAME/$DIR_UCI_CONFIG" ] && [ -z "$IPADDR" ] ; then 
+          log "$CNAME" "UCI config directory not found! Please prepend --ip to specify where to pull from."
           continue
         fi
 	
@@ -263,14 +263,14 @@ pushConfigsSafe () {
       * )
         CNAME="$ARG"
           
-        [ -d "$CNAME" ] \
-          || { log "$CNAME" "Directory not found! All targets must be valid. Aborting..." ; exit 1 ; }
+        [ -d "$CNAME/$DIR_UCI_CONFIG" ] \
+          || { log "$CNAME" "UCI config directory not found! All targets must be valid. Aborting..." ; exit 1 ; }
 
+        [ -z "$IPADDR" ] && IPADDR=$(getIpFromCname "$CNAME")
+  
         # Check local repo is clean
         [ -z "$(hg status "$CNAME")" ] \
           || { log "$CNAME" "Directory contains uncommited changes. Please commit first. Aborting..." ; exit 2 ; }
-  
-        [ -z "$IPADDR" ] && IPADDR=$(getIpFromCname "$CNAME")
   
         unset IPADDR
       ;;
@@ -347,9 +347,9 @@ pushConfigs () {
       ;;
       * )
         CNAME="$ARG"
-  
-        [ -d "$CNAME" ] \
-          || { log "$CNAME" "Directory not found. Ignoring host." ; unset IPADDR ; continue ; }
+
+        [ -d "$CNAME/$DIR_UCI_CONFIG" ] \
+          || { log "$CNAME" "UCI config directory not found. Ignoring host." ; unset IPADDR ; continue ; }
   
         [ -z "$IPADDR" ] && IPADDR=$(getIpFromCname "$CNAME")
   
@@ -369,8 +369,8 @@ confirmConfigs () {
     CNAME="$1"
     shift
   
-    [ -d "$CNAME" ] \
-      || { log "$CNAME" "Directory not found. Ignoring host." ; continue ; }
+    [ -d "$CNAME/$DIR_UCI_CONFIG" ] \
+      || { log "$CNAME" "UCI config directory not found. Ignoring host." ; continue ; }
     
     IPADDR=$(getIpFromCname "$CNAME")
 
@@ -386,8 +386,8 @@ statusConfigs () {
     CNAME="$1"
     shift
 
-    [ -d "$CNAME" ] \
-      || { log "$CNAME" "Directory not found. Ignoring host." ; continue ; }
+    [ -d "$CNAME/$DIR_UCI_CONFIG" ] \
+      || { log "$CNAME" "UCI config directory not found. Ignoring host." ; continue ; }
     
     IPADDR=$(getIpFromCname "$CNAME")
     
