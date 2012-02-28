@@ -47,7 +47,7 @@ else
   echo "************ WARNING: Using filelist \"$BACKUP_FILELIST\""
 fi
 if [ -z "$ETC_FAILSAFE" ] ; then
-  export ETC_FAILSAFE="/etc.failsafe-to-apply/"
+  export ETC_FAILSAFE="/etc.failsafe/"
 fi
 export REBOOT_CMD="/sbin/reboot"
 export NO_REBOOT_CMD="/bin/true"
@@ -59,6 +59,10 @@ export SSH_PERSIST="ssh -o \"ControlMaster auto\"
                     -o \"ConnectTimeout 20\"
                    "
 export EPOCH="$(date +%s)"
+
+export DIR_UCI_CONFIG="/overlay/etc/config/"
+export DIR_OVERLAY="/overlay"
+export DIR_PULL_TMP="/pull.$EPOCH"
 
 export CNAMES_PUSHED="/tmp/ruci.pushed"
 export CNAMES_DIRTY="/tmp/ruci.dirty"
@@ -74,10 +78,7 @@ usage () {
 getIpFromCname () {
   CNAME="${1:?}"
   
-  uci -c "$CNAME/etc/config/" get network.lan.ipaddr
-
-  ### TODO: reimplementar sin usar uci,
-  ###       usando bash + sed
+  uci -c "$CNAME/$DIR_UCI_CONFIG" get network.lan.ipaddr
 }
 
 tstamp () {
@@ -125,21 +126,21 @@ pullConfigFromIp () {
       || return
   fi
 
-  mkdir -p "$CNAME/etc.$EPOCH/"
+  mkdir -p "$CNAME/$DIR_PULL_TMP"
 
-  log "$CNAME" "Pulling config from $IPADDR ..."
-  try "$CNAME" "ssh $IPADDR \"/bin/ls -1d $BACKUP_FILELIST 2>/dev/null \
-                            | /usr/bin/xargs /bin/tar czf - \" >$CNAME/etc.$EPOCH.tar.gz" \
-    || { RETVAL=$? ; rm -rf "$CNAME/etc.$EPOCH"{/,.tar.gz} ; return $RETVAL ; }
+  log "$CNAME" "Pulling overlay from $IPADDR ..."
+  try "$CNAME" "ssh $IPADDR \"/usr/bin/xargs /bin/tar czf $DIR_OVERLAY \" >$CNAME/$DIR_PULL_TMP.tar.gz" \
+    || { RETVAL=$? ; rm -rf "$CNAME/$DIR_PULL_TMP"{/,.tar.gz} ; return $RETVAL ; }
   
-  try "$CNAME" "tar xzf $CNAME/etc.$EPOCH.tar.gz --xform \"s-^etc/--\" -C $CNAME/etc.$EPOCH" \
-    || { RETVAL=$? ; rm -rf "$CNAME/etc.$EPOCH"{/,.tar.gz} ; return $RETVAL ; }
+  try "$CNAME" "tar xzf $CNAME/$DIR_PULL_TMP.tar.gz -C $CNAME/$DIR_PULL_TMP" \
+    || { RETVAL=$? ; rm -rf "$CNAME/$DIR_PULL_TMP"{/,.tar.gz} ; return $RETVAL ; }
 
-  rm -rf "$CNAME/etc.$EPOCH.tar.gz"
+  rm -rf "$CNAME/$DIR_PULL_TMP.tar.gz"
 
   if [ -z "$SKIP_UPDATE" ] ; then 
-    rm -rf "$CNAME/etc"
-    mv "$CNAME/etc.$EPOCH" "$CNAME/etc"
+    rm -rf "$CNAME/$DIR_OVERLAY"
+    mv "$CNAME/$DIR_PULL_TMP/$DIR_OVERLAY" "$CNAME/$DIR_OVERLAY"
+    rm -rf "$CNAME/$DIR_OVERLAY"
   fi
   
   log "$CNAME" "Pulled successfully."
@@ -185,7 +186,7 @@ confirmConfigToIp () {
   CNAME="${1:?}"
   IPADDR="${2:?}"
 
-  log "$CNAME" "Trying to remove ${ETC_FAILSAFE:?} in $IPADDR ... "
+  log "$CNAME" "Trying to remove $ETC_FAILSAFE in $IPADDR ... "
   try "$CNAME" "ssh $IPADDR \"/bin/rm -rfv ${ETC_FAILSAFE:?}\" " \
     || return
 
@@ -201,17 +202,14 @@ statusConfigFromIp () {
   try "$CNAME" "pullConfigFromIp \"$CNAME\" \"$IPADDR\" skip_update" >/dev/null \
     || { log "$CNAME" "$IPADDR Down." ; return ; }
 
-  try "$CNAME" "ssh $IPADDR /bin/sh -c \'[ -d /etc.failsafe-to-apply/ ]\' " \
+  try "$CNAME" "ssh $IPADDR /bin/sh -c \'[ -d $ETC_FAILSAFE ]\' " \
     && STATUSMSG=" Counting down to revert-to-failsafe. Use \`$0 confirm $CNAME\`." \
     && echo -n " $CNAME" >> "$CNAMES_PUSHED"
     
-  try "$CNAME" "ssh $IPADDR /bin/sh -c \'[ -d /etc.failsafe/ ]\' " \
-    && STATUSMSG=" Found /etc.failsafe."
-    
-  try "$CNAME" "diff -qr \"$CNAME/etc\" \"$CNAME/etc.$EPOCH\"" >/dev/null
+  try "$CNAME" "diff -qr \"$CNAME/$DIR_OVERLAY\" \"$CNAME/$DIR_PULL_TMP/$DIR_OVERLAY\"" >/dev/null
     RETVAL=$?
 
-  rm -rf "$CNAME/etc.$EPOCH"
+  rm -rf "$CNAME/$DIR_PULL_TMP"
   
   case $RETVAL in
     0) log "$CNAME" "$IPADDR Reachable and updated.$STATUSMSG" ;;
@@ -315,8 +313,8 @@ pushConfigsSafe () {
           || return
         
         log "$CNAME" "Config sent. Applying changes..."
-        try "$CNAME" "ssh $IPADDR \"    /bin/rm -rf /etc.failsafe/ ;
-                                    ( /bin/cp -a /etc /etc.failsafe \
+        try "$CNAME" "ssh $IPADDR \"    /bin/rm -rf $ETC_FAILSAFE ;
+                                    ( /bin/cp -a /etc $ETC_FAILSAFE \
                                       && /bin/rm -rf $BACKUP_FILELIST \
                                       && /bin/mv /tmp/etc.new.$EPOCH/* /etc/ ) \
                                  && ( /bin/sleep $REBOOT_WAIT \
