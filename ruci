@@ -82,6 +82,28 @@ getIpFromCname () {
   uci -c "$CNAME/$DIR_UCI_CONFIG" get network.lan.ipaddr
 }
 
+logLastPushedRev () {
+  CNAME="${1:?}"
+  
+  hg log --template "{node}\n" -l 1 "$CNAME/$DIR_OVERLAY" > "$CNAME/.lastpushedrev"
+}
+
+getLastPushedRev () {
+  CNAME="${1:?}"
+  
+  cat "$CNAME/.lastpushedrev"
+}
+
+isLastPushedRev () {
+  CNAME="${1:?}"
+  
+  if [ "$(hg log --template "{node}\n" -l 1 "$CNAME/$DIR_OVERLAY")" == "$(getLastPushedRev)" ] ; then
+    return 0
+  else
+    return 1
+  fi
+}
+
 tstamp () {
   date +%F_%T.%3N
 }
@@ -179,6 +201,8 @@ pushConfigToIp () {
                                 && $REBOOT_CMD & )\" " \
     || return
 
+  logLastPushedRev "$CNAME"
+  
   log "$CNAME" "Done.$([ $REBOOT_CMD == $NO_REBOOT_CMD ] || echo " Rebooting in $REBOOT_WAIT secs...")"
   echo -n " $CNAME" >> "$CNAMES_PUSHED"
 }
@@ -211,14 +235,24 @@ statusConfigFromIp () {
                 | diff -X - -qr \"$DIR_OVERLAY\" \"$DIR_PULL_TMP/$DIR_OVERLAY\" ) " >/dev/null
     RETVAL=$?
 
+  rm -rf "$CNAME/$DIR_OVERLAY"
+  mv "$CNAME/$DIR_PULL_TMP/$DIR_OVERLAY" "$CNAME/$DIR_OVERLAY"
   rm -rf "$CNAME/$DIR_PULL_TMP"
   
   case $RETVAL in
     0) log "$CNAME" "$IPADDR Reachable and updated.$STATUSMSG" ;;
-    1) log "$CNAME" "$IPADDR Reachable, with changes pending.$STATUSMSG"
-       echo -n "|$CNAME" >> "$CNAMES_DIRTY" ;;
+    1) 
+      if isLastPushedRev "$CNAME" ; then
+        log "$CNAME" "$IPADDR Reachable, outdated. Remote revision $(getLastPushedRev|cut -b -12).$STATUSMSG"
+      else
+        log "$CNAME" "$IPADDR Reachable, with remote untracked changes. Please pull and manually merge. $STATUSMSG"
+      fi
+      echo -n "|$CNAME" >> "$CNAMES_DIRTY"
+    ;;
     *) log "$CNAME" "Unknown error ($RETVAL) in diff.$STATUSMSG" ;;
   esac
+  
+  hg revert --no-backup "$CNAME/$DIR_OVERLAY" >/dev/null
 }
 
 pullConfigs () {
