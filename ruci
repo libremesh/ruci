@@ -250,6 +250,85 @@ pullConfigs () {
   done
 }
 
+pushConfigsSafe () {
+  ARG=
+  IPADDR=
+  CNAME=
+    
+  # Parse args and populate targets list
+  while [ -n "$1" ]; do
+    ARG="$1"
+    shift
+  
+    case "$ARG" in
+      -i|--ip ) IPADDR="$1"; shift ;;
+      * )
+        CNAME="$ARG"
+          
+        [ -d "$CNAME" ] \
+          || { log "$CNAME" "Directory not found! All targets must be valid. Aborting..." ; exit 1 ; }
+
+        # Check local repo is clean
+        [ -z "$(hg status "$CNAME")" ] \
+          || { log "$CNAME" "Directory contains uncommited changes. Please commit first. Aborting..." ; exit 2 ; }
+  
+        [ -z "$IPADDR" ] && IPADDR=$(getIpFromCname "$CNAME")
+  
+        unset IPADDR
+      ;;
+    esac
+  done
+  
+        RETVAL=
+        BACKUP_FILES=
+  
+        # Open ssh persistent connection
+        try "$CNAME" "$SSH_PERSIST $IPADDR /bin/sh -c \'[ -d $ETC_FAILSAFE ]\' "
+          RETVAL=$?
+          if [ $RETVAL -eq 0 ] ; then
+            log "$CNAME" "Previous push hasn't been confirmed yet. Use \`$0 confirm $CNAME\` first. Aborting..." 
+            exit 3
+          fi
+
+        #   pull and check against last rev ; wait
+        #      [if not clean, exit "try hg merge"]
+        #   copy files ; wait ; "config sent"
+        #   swap /etc /etc.fsf ; wait ; "New config in place"
+        #   reboot ; "Reboot"
+        # close ssh persistent connection
+        # ping ; wait
+        # open ssh persistent connection
+        #   remove /etc.fsf
+        # close ssh persist
+        # save last rev name pushed
+        
+#####
+        
+        for file in $BACKUP_FILELIST; do
+          BACKUP_FILES="$BACKUP_FILES $CNAME/$file"
+        done
+        
+        log "$CNAME" "Sending config with scp to $IPADDR ... "
+        try "$CNAME" "ssh $IPADDR \"/bin/mkdir -p /tmp/etc.new.$EPOCH\" " \
+          || return
+        try "$CNAME" "scp -pr $BACKUP_FILES $IPADDR:/tmp/etc.new.$EPOCH/ >/dev/null" \
+          || return
+        
+        log "$CNAME" "Config sent. Applying changes..."
+        try "$CNAME" "ssh $IPADDR \"    /bin/rm -rf /etc.failsafe/ ;
+                                    ( /bin/cp -a /etc /etc.failsafe \
+                                      && /bin/rm -rf $BACKUP_FILELIST \
+                                      && /bin/mv /tmp/etc.new.$EPOCH/* /etc/ ) \
+                                 && ( /bin/sleep $REBOOT_WAIT \
+                                      && $REBOOT_CMD & )\" " \
+          || return
+
+        log "$CNAME" "Done.$([ $REBOOT_CMD == $NO_REBOOT_CMD ] || echo " Rebooting in $REBOOT_WAIT secs...")"
+        echo -n " $CNAME" >> "$CNAMES_PUSHED"
+
+####
+}
+
 pushConfigs () {
   ARG=
   IPADDR=
