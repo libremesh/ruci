@@ -152,6 +152,7 @@ pullConfigFromIp () { CNAME="${1:?}" ; IPADDR="${2:?}" ; SKIP_UPDATE=$3
   try "$CNAME" "$TAR -x -f $CNAME/$DIR_PULL_TMP.tar -C $CNAME/$DIR_PULL_TMP" \
     || { RETVAL=$? ; rm -rf "$CNAME/$DIR_PULL_TMP"{/,.tar} ; return $RETVAL ; }
 
+  rm -rf "$CNAME/$DIR_PULL_TMP/$DIR_OVERLAY/$ETC_FAILSAFE" # Ignore the temp $ETC_FAILSAFE on remote hosts
   rm -rf "$CNAME/$DIR_PULL_TMP.tar"
 
   if [ -z "$SKIP_UPDATE" ] ; then 
@@ -170,7 +171,7 @@ pushConfigToIp () { CNAME="${1:?}" ;  IPADDR="${2:?}"
   try "$CNAME" "$SSH_PERSIST $IPADDR /bin/sh -c \'[ -d /etc.failsafe-to-apply/ ]\' "
     RETVAL=$?
     if [ $RETVAL -eq 0 ] ; then
-      log "$CNAME" "Previous push hasn't been confirmed yet. Use \`$0 confirm $CNAME\` first. Skipping..." 
+      log "$CNAME" "Previous push hasn't been confirmed yet. Use \`$CMDNAME confirm $CNAME\` first. Skipping..." 
       return
     fi
   
@@ -215,7 +216,7 @@ statusConfigFromIp () { CNAME="${1:?}" ; IPADDR="${2:?}"
     || { log "$CNAME" "$IPADDR Down." ; return ; }
 
   try "$CNAME" "$SSH_PERSIST $IPADDR /bin/sh -c \'[ -d $ETC_FAILSAFE ]\' " \
-    && STATUSMSG=" Counting down to revert-to-failsafe. Use \`$0 confirm $CNAME\`." \
+    && STATUSMSG=" Counting down to revert-to-failsafe..." \
     && echo -n " $CNAME" >> "$CNAMES_PUSHED"
     
   # Compares local working copy with freshly pulled overlay. Returns 0 if they are equal, 1 if differences are found.
@@ -314,7 +315,7 @@ pushConfigsSafe () {
         try "$CNAME" "$SSH_PERSIST $IPADDR /bin/sh -c \'[ -d $ETC_FAILSAFE ]\' "
           RETVAL=$?
           if [ $RETVAL -eq 0 ] ; then
-            log "$CNAME" "Previous push hasn't been confirmed yet. Use \`$0 confirm $CNAME\` first. Aborting..." 
+            log "$CNAME" "Previous push hasn't been confirmed yet. Use \`$CMDNAME confirm $CNAME\` first. Aborting..." 
             exit 3
           fi
 
@@ -455,6 +456,6 @@ if [ -s "$CNAMES_DIRTY" ] ; then
 fi
 
 if [ -s "$CNAMES_PUSHED" ] ; then
-  echo "Don't forget to run \`$CMDNAME confirm $(<"$CNAMES_PUSHED")\`"
+  echo -e "Don't forget to run:\n$CMDNAME confirm $(<"$CNAMES_PUSHED")"
   rm -rf "${CNAMES_PUSHED:?}"
 fi
