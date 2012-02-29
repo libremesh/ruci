@@ -106,7 +106,7 @@ writeLastRevPushed () { CNAME="${1:?}"
 }
 
 readLastRevPushed () { CNAME="${1:?}"
-  [ -r "$CNAME/.lastrevpushed" ] && cat "$CNAME/.lastrevpushed" || echo 0
+  [ -s "$CNAME/.lastrevpushed" ] && cat "$CNAME/.lastrevpushed" || echo 0
 }
 
 tstamp () {
@@ -242,6 +242,7 @@ statusConfigFromIp () { CNAME="${1:?}" ; IPADDR="${2:?}"
     *) log "$CNAME" "Unknown error ($RETVAL) in diff.$STATUSMSG" ;;
   esac
   
+  # Clean up the comparison scenario and leave everything as it was previously
   rm -rf "$CNAME/$DIR_OVERLAY"
   mv "$CNAME/$DIR_OVERLAY.bkp" "$CNAME/$DIR_OVERLAY"
 }
