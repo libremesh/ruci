@@ -82,26 +82,31 @@ getIpFromCname () { CNAME="${1:?}"
   uci -c "$CNAME/$DIR_UCI_CONFIG" get network.lan.ipaddr
 }
 
-logLastPushedRev () {
-  CNAME="${1:?}"
-  
-  hg log --template "{node}\n" -l 1 "$CNAME/$DIR_OVERLAY" > "$CNAME/.lastpushedrev"
+repoIsClean () { CNAME="${1:?}"
+  CNAME_PATH="$(cd -P "$CNAME"; pwd )"
+  [ -z "$(hg status "$CNAME_PATH")" ] && return 0 || return 1
 }
 
-getLastPushedRev () {
-  CNAME="${1:?}"
-  
-  cat "$CNAME/.lastpushedrev"
+repoAutocommit () { CNAME="${1:?}"
+  CNAME_PATH="$(cd -P "$CNAME"; pwd )"
+  hg commit -A -m "Autocommit before pulling from $CNAME." "$CNAME_PATH"
 }
 
-isLastPushedRev () {
-  CNAME="${1:?}"
-  
-  if [ "$(hg log --template "{node}\n" -l 1 "$CNAME/$DIR_OVERLAY")" == "$(getLastPushedRev)" ] ; then
-    return 0
-  else
-    return 1
-  fi
+localLastRevOf () { CNAME="${1:?}"
+  CNAME_OVERLAY_PATH="$(cd -P "$CNAME/$DIR_OVERLAY"; pwd )"
+  hg log --template "{node}\n" -l 1 "$CNAME_OVERLAY_PATH"
+}
+
+writeLastRevPushedOf () { CNAME="${1:?}"
+  localLastRevOf "$CNAME" > "$CNAME/.lastrevpushed"
+}
+
+readLastRevPushedOf () { CNAME="${1:?}"
+  [ -r "$CNAME/.lastrevpushed" ] && cat "$CNAME/.lastrevpushed" || echo "(none)"
+}
+
+isLastRevPushedOf () { CNAME="${1:?}"
+  [ "$(localLastRevOf "$CNAME")" == "$(readLastRevPushedOf "$CNAME")" ] && return 0 || return 1
 }
 
 tstamp () {
@@ -132,9 +137,9 @@ try () { CNAME="${1:?}" ; CMDLINE="${2:?}"
 pullConfigFromIp () { CNAME="${1:?}" ; IPADDR="${2:?}" ; SKIP_UPDATE=$3
   RETVAL=
   
-  if [ -d "$CNAME" ] && [ -z "$SKIP_UPDATE" ] && [ -n "$(hg status "$CNAME")" ] ; then
+  if [ -d "$CNAME" ] && [ -z "$SKIP_UPDATE" ] && ! repoIsClean "$CNAME" ; then
     log "$CNAME" "Directory contains uncommited changes. Autocommiting..."
-    try "$CNAME" "hg commit -A -m \"Autocommit before pulling from $IPADDR\" $CNAME" \
+    try "$CNAME" "repoAutocommit \"$CNAME\"" \
       || return
   fi
 
@@ -188,7 +193,7 @@ pushConfigToIp () { CNAME="${1:?}" ;  IPADDR="${2:?}"
                                 && $REBOOT_CMD & )\" " \
     || return
 
-  logLastPushedRev "$CNAME"
+  writeLastRevPushedOf "$CNAME"
   
   log "$CNAME" "Done.$([ $REBOOT_CMD == $NO_REBOOT_CMD ] || echo " Rebooting in $REBOOT_WAIT secs...")"
   echo -n " $CNAME" >> "$CNAMES_PUSHED"
@@ -217,24 +222,25 @@ statusConfigFromIp () { CNAME="${1:?}" ; IPADDR="${2:?}"
                 | diff -X - -qr \"$DIR_OVERLAY\" \"$DIR_PULL_TMP/$DIR_OVERLAY\" ) " >/dev/null
     RETVAL=$?
 
-  rm -rf "$CNAME/$DIR_OVERLAY"
+  mv "$CNAME/$DIR_OVERLAY" "$CNAME/$DIR_OVERLAY.bkp"
   mv "$CNAME/$DIR_PULL_TMP/$DIR_OVERLAY" "$CNAME/$DIR_OVERLAY"
   rm -rf "$CNAME/$DIR_PULL_TMP"
   
   case $RETVAL in
     0) log "$CNAME" "$IPADDR Reachable and updated.$STATUSMSG" ;;
     1) 
-      if isLastPushedRev "$CNAME" ; then
-        log "$CNAME" "$IPADDR Reachable, outdated. Remote revision $(getLastPushedRev|cut -b -12).$STATUSMSG"
+      if isLastRevPushedOf "$CNAME" ; then
+        log "$CNAME" "$IPADDR Reachable, outdated. Remote revision $(readLastRevPushedOf "$CNAME"|cut -b -12).$STATUSMSG"
       else
-        log "$CNAME" "$IPADDR Reachable, with remote untracked changes. Please pull and manually merge. $STATUSMSG"
+        log "$CNAME" "$IPADDR Reachable, with remote untracked changes. Please pull and manually merge.$STATUSMSG"
       fi
       echo -n "|$CNAME" >> "$CNAMES_DIRTY"
     ;;
     *) log "$CNAME" "Unknown error ($RETVAL) in diff.$STATUSMSG" ;;
   esac
   
-  hg revert --no-backup "$CNAME/$DIR_OVERLAY" >/dev/null
+  rm -rf "$CNAME/$DIR_OVERLAY"
+  mv "$CNAME/$DIR_OVERLAY.bkp" "$CNAME/$DIR_OVERLAY"
 }
 
 pullConfigs () {
@@ -288,9 +294,10 @@ pushConfigsSafe () {
         [ -z "$IPADDR" ] && IPADDR=$(getIpFromCname "$CNAME")
   
         # Check local repo is clean
-        [ -z "$(hg status "$CNAME")" ] \
-          || { log "$CNAME" "Directory contains uncommited changes. Please commit first. Aborting..." ; exit 2 ; }
-  
+        if ! repoIsClean "$CNAME" ; then
+          log "$CNAME" "Directory contains uncommited changes. Please commit first. Aborting..." ; exit 2
+        fi
+        
         unset IPADDR
       ;;
     esac
