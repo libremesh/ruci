@@ -88,7 +88,8 @@ repoIsClean () { CNAME="${1:?}"
 
 repoIsEqualToRev () { CNAME="${1:?}" ; REV="${2:?}"
   CNAME_OVERLAY_PATH="$(cd -P "$CNAME/$DIR_OVERLAY"; pwd )"
-  [ -z "$(hg status --rev $REV "$CNAME_OVERLAY_PATH")" ] && return 0 || return 1
+  STDOUT="$(hg status --rev $REV "$CNAME_OVERLAY_PATH")" ; RETVAL=$?
+  ([ -z "$STDOUT" ] && [ $RETVAL -eq 0 ]) && return 0 || return 1
 }
 
 repoAutocommit () { CNAME="${1:?}"
@@ -230,7 +231,13 @@ statusConfigFromIp () { CNAME="${1:?}" ; IPADDR="${2:?}"
   rm -rf "$CNAME/$DIR_PULL_TMP"
   
   case $RETVAL in
-    0) log "$CNAME" "$IPADDR Reachable and updated.$STATUSMSG" ;;
+    0)      # Local and remote copies are equal, that means we can consider the current revision as pushed
+            # even if it wasn't done with "action push". So, update LastRevPushed cookie
+            # If you do "hg commit; ruci push; hg rollback; ...; hg commit", then a simple
+            # "hg status" should update/fix cookies that point to vanished changeset ids.
+      writeLastRevPushed "$CNAME"
+      log "$CNAME" "$IPADDR Reachable and updated.$STATUSMSG"
+    ;;
     1)      # If copies differ, might be because local has a new revision waiting to be pushed,
             # (in which case working copy is identical to the one in revision readLastRevPushed)
       if repoIsEqualToRev "$CNAME" "$(readLastRevPushed "$CNAME")" ; then
