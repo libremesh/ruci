@@ -83,30 +83,30 @@ getIpFromCname () { CNAME="${1:?}"
 }
 
 repoIsClean () { CNAME="${1:?}"
-  CNAME_PATH="$(cd -P "$CNAME"; pwd )"
-  [ -z "$(hg status "$CNAME_PATH")" ] && return 0 || return 1
+  repoIsEqualToRev "$CNAME" "-1"
+}
+
+repoIsEqualToRev () { CNAME="${1:?}" ; REV="${2:?}"
+  CNAME_OVERLAY_PATH="$(cd -P "$CNAME/$DIR_OVERLAY"; pwd )"
+  [ -z "$(hg status --rev $REV "$CNAME_OVERLAY_PATH")" ] && return 0 || return 1
 }
 
 repoAutocommit () { CNAME="${1:?}"
-  CNAME_PATH="$(cd -P "$CNAME"; pwd )"
-  hg commit -A -m "Autocommit before pulling from $CNAME." "$CNAME_PATH"
+  CNAME_OVERLAY_PATH="$(cd -P "$CNAME/$DIR_OVERLAY"; pwd )"
+  hg commit -A -m "Autocommit before pulling from $CNAME." "$CNAME_OVERLAY_PATH"
 }
 
-localLastRevOf () { CNAME="${1:?}"
+repoLastRev () { CNAME="${1:?}"
   CNAME_OVERLAY_PATH="$(cd -P "$CNAME/$DIR_OVERLAY"; pwd )"
   hg log --template "{node}\n" -l 1 "$CNAME_OVERLAY_PATH"
 }
 
-writeLastRevPushedOf () { CNAME="${1:?}"
-  localLastRevOf "$CNAME" > "$CNAME/.lastrevpushed"
+writeLastRevPushed () { CNAME="${1:?}"
+  repoLastRev "$CNAME" > "$CNAME/.lastrevpushed"
 }
 
-readLastRevPushedOf () { CNAME="${1:?}"
-  [ -r "$CNAME/.lastrevpushed" ] && cat "$CNAME/.lastrevpushed" || echo "(none)"
-}
-
-isLastRevPushedOf () { CNAME="${1:?}"
-  [ "$(localLastRevOf "$CNAME")" == "$(readLastRevPushedOf "$CNAME")" ] && return 0 || return 1
+readLastRevPushed () { CNAME="${1:?}"
+  [ -r "$CNAME/.lastrevpushed" ] && cat "$CNAME/.lastrevpushed" || echo 0
 }
 
 tstamp () {
@@ -193,7 +193,7 @@ pushConfigToIp () { CNAME="${1:?}" ;  IPADDR="${2:?}"
                                 && $REBOOT_CMD & )\" " \
     || return
 
-  writeLastRevPushedOf "$CNAME"
+  writeLastRevPushed "$CNAME"
   
   log "$CNAME" "Done.$([ $REBOOT_CMD == $NO_REBOOT_CMD ] || echo " Rebooting in $REBOOT_WAIT secs...")"
   echo -n " $CNAME" >> "$CNAMES_PUSHED"
@@ -218,21 +218,24 @@ statusConfigFromIp () { CNAME="${1:?}" ; IPADDR="${2:?}"
     && STATUSMSG=" Counting down to revert-to-failsafe. Use \`$0 confirm $CNAME\`." \
     && echo -n " $CNAME" >> "$CNAMES_PUSHED"
     
+  # Compares local working copy with freshly pulled overlay. Returns 0 if they are equal, 1 if differences are found.
   try "$CNAME" "diff -q . . ; ( cd \"$CNAME\" ; find -L \"$DIR_OVERLAY\" \"$DIR_PULL_TMP/$DIR_OVERLAY\" -type l -printf \"%f\n\"\
                 | diff -X - -qr \"$DIR_OVERLAY\" \"$DIR_PULL_TMP/$DIR_OVERLAY\" ) " >/dev/null
     RETVAL=$?
 
+  # Makes the freshly pulled overlay a working copy, to compare against past revisions.
   mv "$CNAME/$DIR_OVERLAY" "$CNAME/$DIR_OVERLAY.bkp"
   mv "$CNAME/$DIR_PULL_TMP/$DIR_OVERLAY" "$CNAME/$DIR_OVERLAY"
   rm -rf "$CNAME/$DIR_PULL_TMP"
   
   case $RETVAL in
     0) log "$CNAME" "$IPADDR Reachable and updated.$STATUSMSG" ;;
-    1) 
-      if isLastRevPushedOf "$CNAME" ; then
-        log "$CNAME" "$IPADDR Reachable, outdated. Remote revision $(readLastRevPushedOf "$CNAME"|cut -b -12).$STATUSMSG"
-      else
-        log "$CNAME" "$IPADDR Reachable, with remote untracked changes. Please pull and manually merge.$STATUSMSG"
+    1)      # If copies differ, might be because local has a new revision waiting to be pushed,
+            # (in which case working copy is identical to the one in revision readLastRevPushed)
+      if repoIsEqualToRev "$CNAME" "$(readLastRevPushed "$CNAME")" ; then
+        log "$CNAME" "$IPADDR Reachable, outdated. Remote revision $(readLastRevPushed "$CNAME"|cut -b -12).$STATUSMSG"
+      else  # or else because changes happened only remotely.
+        log "$CNAME" "$IPADDR Reachable, with remote untracked changes. Please pull, manually merge and commit.$STATUSMSG"
       fi
       echo -n "|$CNAME" >> "$CNAMES_DIRTY"
     ;;
