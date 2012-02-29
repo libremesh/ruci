@@ -23,7 +23,7 @@
 #
 ### 
 ### Usage: $0 push [--no-reboot] [--wait secs] [--ip <host>] NAME [[--ip <host>] NAME] ...
-###        $0 pull [--ip <host>] NAME [[--ip <host>] NAME] ...
+###        $0 pull [--gzip] [--ip <host>] NAME [[--ip <host>] NAME] ...
 ###        $0 confirm NAME [NAME] ...
 ###        $0 status  NAME [NAME] ...
 ### 
@@ -34,7 +34,9 @@
 ###  -i, --ip HOST		Push the configuration to specified IP or host.
 ###                     Applies only to the next NAME specified in command line.
 ###  -n, --no-reboot	Prevent rebooting after pushing and applying configuration.
-### 
+###  -z, --gzip       Use gzip compression on incoming network traffic during pull.
+###                     Better perfomance on slow links, at the expense of high cpu load.
+###
 #
 #
 
@@ -51,7 +53,7 @@ if [ -z "$ETC_FAILSAFE" ] ; then
 fi
 export REBOOT_CMD="/sbin/reboot"
 export NO_REBOOT_CMD="/bin/true"
-export TAR="tar" # Use "tar -z" if you want network traffic to be compressed during pull
+export TAR="tar" # This command must accept argument -z to enable gzip compression
 export CMDNAME="$(basename "$0")"
 export SSH_PERSIST="ssh -o \"ControlMaster auto\" 
                     -o \"ControlPath /tmp/$CMDNAME_ssh_%r@%h:%p\"
@@ -266,6 +268,7 @@ pullConfigs () {
   
     case "$ARG" in
       -i|--ip ) IPADDR="$1" ; shift ;;
+      -z|--gzip ) TAR="$TAR -z" ;;
       * )
         CNAME="$ARG"
 
