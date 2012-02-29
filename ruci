@@ -55,11 +55,11 @@ export REBOOT_CMD="/sbin/reboot"
 export NO_REBOOT_CMD="/bin/true"
 export TAR="tar" # This command must accept argument -z to enable gzip compression
 export CMDNAME="$(basename "$0")"
-export SSH_PERSIST="ssh -o \"ControlMaster auto\" 
-                    -o \"ControlPath /tmp/$CMDNAME_ssh_%r@%h:%p\"
-                    -o \"ControlPersist 60\"
-                    -o \"ServerAliveInterval 10\"
-                    -o \"ConnectTimeout 20\"
+export SSH_PERSIST="ssh -o \"ControlMaster auto\" \
+                    -o \"ControlPath /tmp/$CMDNAME_ssh_%r@%h:%p\" \
+                    -o \"ControlPersist 60\" \
+                    -o \"ServerAliveInterval 10\" \
+                    -o \"ConnectTimeout 20\" \
                    "
 export EPOCH="$(date +%s)"
 
@@ -72,15 +72,13 @@ export CNAMES_DIRTY="/tmp/ruci.dirty"
 cat /dev/null >"${CNAMES_PUSHED:?}"
 cat /dev/null >"${CNAMES_DIRTY:?}"
 
-usage () {
-  [ -n "$1" ] && echo "$@"
+usage () { REASON="$*"
+  [ -n "$REASON" ] && echo "$REASON"
   sed -n "/^### /{s///;s|\$0|$CMDNAME|g;p}" "$0"
   exit 1
 }
 
-getIpFromCname () {
-  CNAME="${1:?}"
-  
+getIpFromCname () { CNAME="${1:?}"
   uci -c "$CNAME/$DIR_UCI_CONFIG" get network.lan.ipaddr
 }
 
@@ -110,22 +108,15 @@ tstamp () {
   date +%F_%T.%3N
 }
 
-log () {
-  CNAME="${1:?}"
-  shift
-  TEXT="$*"
-  
+log () { CNAME="${1:?}" ; shift; TEXT="$*"
   echo "$TEXT" \
     | sed "/tar: removing leading ... from member/d" \
     | sed "s|^|[$CNAME] $(tstamp): |" \
     | tee -a "$LOGFILE"
 }
  
-try () {
-  CNAME="${1:?}"
-  CMDLINE="${2:?}"
+try () { CNAME="${1:?}" ; CMDLINE="${2:?}"
   CMD="${CMDLINE%% *}"
-  
   ERRLOG="/tmp/$CMD.${CNAME////}.$EPOCH"
   
   eval "$CMDLINE" &> "$ERRLOG"
@@ -138,11 +129,7 @@ try () {
   return $RETVAL
 }
 
-pullConfigFromIp () {
-  CNAME="${1:?}"
-  IPADDR="${2:?}"
-  SKIP_UPDATE=$3
-  
+pullConfigFromIp () { CNAME="${1:?}" ; IPADDR="${2:?}" ; SKIP_UPDATE=$3
   RETVAL=
   
   if [ -d "$CNAME" ] && [ -z "$SKIP_UPDATE" ] && [ -n "$(hg status "$CNAME")" ] ; then
@@ -171,9 +158,7 @@ pullConfigFromIp () {
   log "$CNAME" "Pulled successfully."
 }
 
-pushConfigToIp () {
-  CNAME="${1:?}"
-  IPADDR="${2:?}"
+pushConfigToIp () { CNAME="${1:?}" ;  IPADDR="${2:?}"
   RETVAL=
   BACKUP_FILES=
   
@@ -209,10 +194,7 @@ pushConfigToIp () {
   echo -n " $CNAME" >> "$CNAMES_PUSHED"
 }
 
-confirmConfigToIp () {
-  CNAME="${1:?}"
-  IPADDR="${2:?}"
-
+confirmConfigToIp () { CNAME="${1:?}" ; IPADDR="${2:?}"
   log "$CNAME" "Trying to remove $ETC_FAILSAFE in $IPADDR ... "
   try "$CNAME" "$SSH_PERSIST $IPADDR \"/bin/rm -rfv ${ETC_FAILSAFE:?}\" " \
     || return
@@ -220,9 +202,7 @@ confirmConfigToIp () {
   log "$CNAME" "Done."
 }
 
-statusConfigFromIp () {
-  CNAME="${1:?}"
-  IPADDR="${2:?}"
+statusConfigFromIp () { CNAME="${1:?}" ; IPADDR="${2:?}"
   RETVAL=
   STATUSMSG=
   
