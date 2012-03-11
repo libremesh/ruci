@@ -42,11 +42,10 @@
 
 export REBOOT_WAIT=15  # in seconds #DEPRECATED
 export TIMEOUT=15  # in seconds
-if [ -z "$BACKUP_FILELIST" ] ; then
-  export BACKUP_FILELIST="/etc/config/ /etc/dropbear/ /etc/crontabs/ /etc/firewall.user /etc/group /etc/hosts /etc/inittab /etc/passwd /etc/profile /etc/rc.local /etc/shadow /etc/shells /etc/sysctl.conf"
-  export BACKUP_FILELIST="$BACKUP_FILELIST /etc/bat-hosts"
+if [ -z "$PUSH_FILELIST" ] ; then
+  export PUSH_FILELIST="/etc"
 else
-  echo "************ WARNING: Using filelist \"$BACKUP_FILELIST\""
+  echo "************ WARNING: Using filelist \"$PUSH_FILELIST\""
 fi
 if [ -z "$ETC_FAILSAFE" ] ; then
   export ETC_FAILSAFE="/etc.failsafe/"
@@ -66,6 +65,7 @@ export EPOCH="$(date +%s)"
 export DIR_UCI_CONFIG="overlay/etc/config/"
 export DIR_OVERLAY="overlay"
 export DIR_PULL_TMP="remote.$EPOCH"
+export DIR_PUSH_TMP="overlay.new.$EPOCH"
 
 export CNAMES_PUSHED="/tmp/ruci.pushed"
 export CNAMES_DIRTY="/tmp/ruci.dirty"
@@ -167,7 +167,7 @@ pullConfigFromIp () { CNAME="${1:?}" ; IPADDR="${2:?}" ; SKIP_UPDATE=$3
 
 pushConfigToIp () { CNAME="${1:?}" ;  IPADDR="${2:?}"
   RETVAL=
-  BACKUP_FILES=
+  PUSH_FILES=
   
   try "$CNAME" "$SSH_PERSIST $IPADDR /bin/sh -c \'[ -d /etc.failsafe-to-apply/ ]\' "
     RETVAL=$?
@@ -176,21 +176,23 @@ pushConfigToIp () { CNAME="${1:?}" ;  IPADDR="${2:?}"
       return
     fi
   
-  for file in $BACKUP_FILELIST; do
-    BACKUP_FILES="$BACKUP_FILES $CNAME/$DIR_OVERLAY/$file"
-  done
-  
   log "$CNAME" "Sending config with scp to $IPADDR ... "
-  try "$CNAME" "$SSH_PERSIST $IPADDR \"/bin/mkdir -p /tmp/etc.new.$EPOCH\" " \
-    || return
-  try "$CNAME" "scp -pr $BACKUP_FILES $IPADDR:/tmp/etc.new.$EPOCH/ >/dev/null" \
+  try "$CNAME" "$SSH_PERSIST $IPADDR \"/bin/mkdir -p /tmp/$DIR_PUSH_TMP/\" " \
     || return
   
+  try "$CNAME" "$TAR -c --owner root --group root -f $CNAME/$DIR_PUSH_TMP.tar -C $CNAME/$DIR_OVERLAY/ ./$PUSH_FILELIST" \
+    || { RETVAL=$? ; rm -rf "$CNAME/$DIR_PUSH_TMP"{/,.tar} ; return $RETVAL ; }
+  
+  try "$CNAME" "$SSH_PERSIST $IPADDR \"$TAR -x -f - -C /tmp/$DIR_PUSH_TMP/ \" <$CNAME/$DIR_PUSH_TMP.tar" \
+    || { RETVAL=$? ; rm -rf "$CNAME/$DIR_PUSH_TMP"{/,.tar} ; return $RETVAL ; }
+  
+  rm -rf "$CNAME/$DIR_PUSH_TMP.tar"
+
   log "$CNAME" "Config sent. Applying changes..."
   try "$CNAME" "$SSH_PERSIST $IPADDR \"    /bin/rm -rf /etc.failsafe/ ;
                               ( /bin/cp -a /etc /etc.failsafe \
-                                && /bin/rm -rf $BACKUP_FILELIST \
-                                && /bin/mv /tmp/etc.new.$EPOCH/* /etc/ ) \
+                                && /bin/rm -rf $PUSH_FILELIST \
+                                && /bin/mv /tmp/$DIR_PUSH_TMP/* / ) \
                            && ( /bin/sleep $REBOOT_WAIT \
                                 && $REBOOT_CMD & )\" " \
     || return
@@ -316,7 +318,7 @@ pushConfigsSafe () {
   done
   
         RETVAL=
-        BACKUP_FILES=
+        PUSH_FILES=
   
         # Open ssh persistent connection
         try "$CNAME" "$SSH_PERSIST $IPADDR /bin/sh -c \'[ -d $ETC_FAILSAFE ]\' "
@@ -340,20 +342,20 @@ pushConfigsSafe () {
         
 #####
         
-        for file in $BACKUP_FILELIST; do
-          BACKUP_FILES="$BACKUP_FILES $CNAME/$DIR_OVERLAY/$file"
+        for file in $PUSH_FILELIST; do
+          PUSH_FILES="$PUSH_FILES $CNAME/$DIR_OVERLAY/$file"
         done
         
         log "$CNAME" "Sending config with scp to $IPADDR ... "
         try "$CNAME" "$SSH_PERSIST $IPADDR \"/bin/mkdir -p /tmp/etc.new.$EPOCH\" " \
           || return
-        try "$CNAME" "scp -pr $BACKUP_FILES $IPADDR:/tmp/etc.new.$EPOCH/ >/dev/null" \
+        try "$CNAME" "scp -pr $PUSH_FILES $IPADDR:/tmp/etc.new.$EPOCH/ >/dev/null" \
           || return
         
         log "$CNAME" "Config sent. Applying changes..."
         try "$CNAME" "$SSH_PERSIST $IPADDR \"    /bin/rm -rf $ETC_FAILSAFE ;
                                     ( /bin/cp -a /etc $ETC_FAILSAFE \
-                                      && /bin/rm -rf $BACKUP_FILELIST \
+                                      && /bin/rm -rf $PUSH_FILELIST \
                                       && /bin/mv /tmp/etc.new.$EPOCH/* /etc/ ) \
                                  && ( /bin/sleep $REBOOT_WAIT \
                                       && $REBOOT_CMD & )\" " \
