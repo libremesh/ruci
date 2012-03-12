@@ -22,10 +22,10 @@
 #       MA 02110-1301, USA.
 #
 ### 
-### Usage: $0 push [--no-reboot] [--wait secs] [--ip <host>] NAME [[--ip <host>] NAME] ...
-###        $0 pull [--gzip] [--ip <host>] NAME [[--ip <host>] NAME] ...
+### Usage: $0 push [-n] [-f] [-w secs] [-i <host>] NAME [[-i <host>] NAME] ...
+###        $0 pull [-z] [-i <host>] NAME [[-i <host>] NAME] ...
 ###        $0 confirm NAME [NAME] ...
-###        $0 status  NAME [NAME] ...
+###        $0 status [-f] NAME [NAME] ...
 ### 
 ### Manage remote uci configuration in NAME(s)
 ### 
@@ -36,16 +36,16 @@
 ###  -n, --no-reboot	Prevent rebooting after pushing and applying configuration.
 ###  -z, --gzip       Use gzip compression on incoming network traffic during pull.
 ###                     Better perfomance on slow links, at the expense of high cpu load.
+###  -f, --full       Push (or check) whole /overlay instead of just /overlay/etc.
+###                     Increases network traffic = slower perfomance.
+###                     Useful to check for package installs or removals
+###                     or to push a complete overlay to a clean install of openwrt.
 ###
 #
 #
 
 export REBOOT_WAIT=15  # in seconds #DEPRECATED
 export TIMEOUT=15  # in seconds
-export PUSH_FILELIST="etc/"
-if [ -z "$ETC_FAILSAFE" ] ; then
-  export ETC_FAILSAFE="etc.failsafe/"
-fi
 export REBOOT_CMD="/sbin/reboot"
 export NO_REBOOT_CMD="/bin/true"
 export TAR="tar" # This command must accept argument -z to enable gzip compression
@@ -58,10 +58,13 @@ export SSH_PERSIST="ssh -o \"ControlMaster auto\" \
                    "
 export EPOCH="$(date +%s)"
 
-export DIR_UCI_CONFIG="overlay/etc/config/"
 export DIR_OVERLAY="overlay"
+export DIR_UCI_CONFIG="$DIR_OVERLAY/etc/config/"
 export DIR_PULL_TMP="remote.$EPOCH"
+export DIR_TO_DIFF="${DIR_OVERLAY:?}/etc"
 export DIR_PUSH_TMP="overlay.new.$EPOCH"
+export DIR_TO_PUSH="/etc/"
+export ETC_FAILSAFE="etc.failsafe/"
 
 export CNAMES_PUSHED="/tmp/ruci.pushed"
 export CNAMES_DIRTY="/tmp/ruci.dirty"
@@ -82,8 +85,8 @@ repoIsClean () {
   repoIsEqualToRev "-1"
 }
 
-repoIsEqualToRev () { REV="${1:?}"
-  STDOUT="$(hg status --rev $REV "$DIR_OVERLAY")" ; RETVAL=$?
+repoIsEqualToRev () { REV="${1:?}" ; DIR="${2:-$DIR_OVERLAY}"
+  STDOUT="$(hg status --rev $REV "$DIR")" ; RETVAL=$?
   ([ -z "$STDOUT" ] && [ $RETVAL -eq 0 ]) && return 0 || return 1
 }
 
@@ -141,7 +144,7 @@ pullConfigFromIp () { IPADDR="${1:?}"
 
   mkdir -p "$DIR_PULL_TMP"
 
-  log "Pulling $DIR_OVERLAY from $IPADDR ..."
+  log "Pulling /$DIR_OVERLAY from $IPADDR ..."
   try "$SSH_PERSIST $IPADDR \"$TAR -c -f - /$DIR_OVERLAY \" >$DIR_PULL_TMP.tar" \
     || { RETVAL=$? ; rm -rf "$DIR_PULL_TMP"{/,.tar} ; return $RETVAL ; }
   
@@ -168,11 +171,11 @@ pushConfigToIp () { IPADDR="${1:?}"
       return
     fi
   
-  log "Sending config with scp to $IPADDR ... "
+  log "Sending ${DIR_TO_PUSH:-/$DIR_OVERLAY} with '$TAR' to $IPADDR ... "
   try "$SSH_PERSIST $IPADDR \"/bin/mkdir -p /tmp/$DIR_PUSH_TMP/\" " \
     || return
   
-  try "$TAR -c --owner root --group root -f $DIR_PUSH_TMP.tar -C $DIR_OVERLAY/ $PUSH_FILELIST" \
+  try "$TAR -c --owner root --group root -f $DIR_PUSH_TMP.tar -C $DIR_OVERLAY/ ./$DIR_TO_PUSH" \
     || { RETVAL=$? ; rm -rf "$DIR_PUSH_TMP.tar" ; return $RETVAL ; }
   
   try "$SSH_PERSIST $IPADDR \"$TAR -x -f - -C /tmp/$DIR_PUSH_TMP/ \" <$DIR_PUSH_TMP.tar" \
@@ -182,12 +185,13 @@ pushConfigToIp () { IPADDR="${1:?}"
 
   log "Config sent. Applying changes..."
   try "$SSH_PERSIST $IPADDR \"  cd /$DIR_OVERLAY \
-                           &&   rm -rf $ETC_FAILSAFE \
-                           && ( cp -a etc $ETC_FAILSAFE \
-                                && rm -rf $PUSH_FILELIST \
-                                && mv /tmp/$DIR_PUSH_TMP/* ./ ) \
-                           && ( sleep $REBOOT_WAIT \
-                                && $REBOOT_CMD & )\" " \
+                            &&  rm -rf /$ETC_FAILSAFE \
+                            &&  (  cp -a /etc /$ETC_FAILSAFE \
+                                && cp -a etc /tmp/$DIR_PUSH_TMP/$ETC_FAILSAFE \
+                                && rm -rf ./${DIR_TO_PUSH:-*} \
+                                && cp -a /tmp/$DIR_PUSH_TMP/${DIR_TO_PUSH:-*} . ) \
+                            &&  (  sleep $REBOOT_WAIT \
+                                && $REBOOT_CMD & ) \" " \
     || return
 
   writeLastRevPushed
@@ -210,45 +214,36 @@ statusConfigFromIp () { IPADDR="${1:?}"
   RETVAL=
   STATUSMSG=
 
-  mkdir -p "$DIR_PULL_TMP"
-
-  log "Pulling $DIR_OVERLAY/etc from $IPADDR ..."
-
-  try "$SSH_PERSIST $IPADDR \"$TAR -c -f - /$DIR_OVERLAY/etc \" >$DIR_PULL_TMP.tar" \
-    || { RETVAL=$? ; rm -rf "$DIR_PULL_TMP"{/,.tar} ; return $RETVAL ; }
-  
-  try "$TAR -x -f $DIR_PULL_TMP.tar -C $DIR_PULL_TMP" \
-    || { RETVAL=$? ; rm -rf "$DIR_PULL_TMP"{/,.tar} ; return $RETVAL ; }
-
-  rm -rf "$DIR_PULL_TMP/$DIR_OVERLAY/$ETC_FAILSAFE" # Ignore the temp $ETC_FAILSAFE on remote hosts
-  rm -rf "$DIR_PULL_TMP.tar"
-
-  if [ -z "$SKIP_UPDATE" ] ; then 
-    rm -rf "$DIR_OVERLAY"
-    mv "$DIR_PULL_TMP/$DIR_OVERLAY" "$DIR_OVERLAY"
-    rm -rf "$DIR_PULL_TMP"
-  fi
-  
-  log "Pulled successfully."
-  #########
-      
   CNAME="$(basename `pwd -L`)"
   
-  try "pullConfigFromIp \"$IPADDR\" skip_update" >/dev/null \
-    || { log "$IPADDR Down." ; return ; }
+  ( mkdir -p "$DIR_PULL_TMP"
+
+    log "Pulling /$DIR_TO_DIFF from $IPADDR ..."
+
+    try "$SSH_PERSIST $IPADDR \"$TAR -c -f - /$DIR_TO_DIFF \" >$DIR_PULL_TMP.tar" \
+      || { RETVAL=$? ; rm -rf "$DIR_PULL_TMP"{/,.tar} ; return $RETVAL ; }
+    
+    try "$TAR -x -f $DIR_PULL_TMP.tar -C $DIR_PULL_TMP" \
+      || { RETVAL=$? ; rm -rf "$DIR_PULL_TMP"{/,.tar} ; return $RETVAL ; }
+
+    rm -rf "$DIR_PULL_TMP/$DIR_OVERLAY/$ETC_FAILSAFE" # Ignore the temp $ETC_FAILSAFE on remote hosts
+    rm -rf "$DIR_PULL_TMP.tar"
+    
+    log "Pulled successfully." ) >/dev/null \
+      || { log "$IPADDR Down." ; return ; }
 
   try "$SSH_PERSIST $IPADDR /bin/sh -c \'[ -d /$ETC_FAILSAFE ]\' " \
     && STATUSMSG=" Counting down to revert-to-failsafe..." \
     && echo -n " $CNAME" >> "$CNAMES_PUSHED"
     
   # Compares local working copy with freshly pulled overlay. Returns 0 if they are equal, 1 if differences are found.
-  try "diff -q . . ; ( find -L \"$DIR_OVERLAY\" \"$DIR_PULL_TMP/$DIR_OVERLAY\" -type l -printf \"%f\n\"\
-                | diff -X - -qr \"$DIR_OVERLAY\" \"$DIR_PULL_TMP/$DIR_OVERLAY\" ) " >/dev/null
+  try "diff -q . . ; ( find -L \"$DIR_TO_DIFF\" \"$DIR_PULL_TMP/$DIR_TO_DIFF\" -type l -printf \"%f\n\"\
+                | diff -X - -qr \"$DIR_TO_DIFF\" \"$DIR_PULL_TMP/$DIR_TO_DIFF\" ) " >/dev/null
     RETVAL=$?
 
   # Makes the freshly pulled overlay a working copy, to compare against past revisions.
-  mv "$DIR_OVERLAY" "$DIR_OVERLAY.bkp"
-  mv "$DIR_PULL_TMP/$DIR_OVERLAY" "$DIR_OVERLAY"
+  mv "$DIR_TO_DIFF" "$DIR_TO_DIFF.bkp"
+  mv "$DIR_PULL_TMP/$DIR_TO_DIFF" "$DIR_TO_DIFF"
   rm -rf "$DIR_PULL_TMP"
   
   case $RETVAL in
@@ -261,7 +256,7 @@ statusConfigFromIp () { IPADDR="${1:?}"
     ;;
     1)      # If copies differ, might be because local has a new revision waiting to be pushed,
             # (in which case working copy is identical to the one in revision readLastRevPushed)
-      if repoIsEqualToRev "$(readLastRevPushed)" ; then
+      if repoIsEqualToRev "$(readLastRevPushed)" "$DIR_TO_DIFF" ; then
         log "$IPADDR Reachable, outdated. Remote revision $(readLastRevPushed|cut -b -12).$STATUSMSG"
       else  # or else because changes happened only remotely.
         log "$IPADDR Reachable, with remote untracked changes. Please pull, manually merge and commit.$STATUSMSG"
@@ -272,8 +267,8 @@ statusConfigFromIp () { IPADDR="${1:?}"
   esac
   
   # Clean up the comparison scenario and leave everything as it was previously
-  rm -rf "$DIR_OVERLAY"
-  mv "$DIR_OVERLAY.bkp" "$DIR_OVERLAY"
+  rm -rf "$DIR_TO_DIFF"
+  mv "$DIR_TO_DIFF.bkp" "$DIR_TO_DIFF"
 }
 
 pullConfigs () {
@@ -373,6 +368,7 @@ pushConfigs () {
     case "$ARG" in
       -i|--ip ) IPADDR="$1" ; shift ;;
       -n|--no-reboot ) REBOOT_CMD="$NO_REBOOT_CMD" ;;
+      -f|--full ) unset DIR_TO_PUSH ;;
       -w|--wait ) 
         if [ -z "${1//[0-9]/}" ] ; then
           REBOOT_WAIT=$1 ; shift
@@ -421,15 +417,20 @@ statusConfigs () {
   while [ -n "$1" ]; do
     ARG="$1"
     shift
-
-    cd "$ARG"
-      [ -d "$DIR_UCI_CONFIG" ] \
-        || { log "UCI config directory not found. Ignoring host." ; continue ; }
-      
-      IPADDR=$(getIpFromUciConfig)
-      
-      statusConfigFromIp "$IPADDR" &
-    cd "$OLDPWD"
+    
+    case "$ARG" in
+      -f|--full ) DIR_TO_DIFF="$DIR_OVERLAY" ;;
+      * )
+        cd "$ARG"
+          [ -d "$DIR_UCI_CONFIG" ] \
+            || { log "UCI config directory not found. Ignoring host." ; continue ; }
+          
+          IPADDR=$(getIpFromUciConfig)
+          
+          statusConfigFromIp "$IPADDR" &
+        cd "$OLDPWD"
+      ;;
+    esac
   done
 }
 
