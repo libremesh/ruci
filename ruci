@@ -87,7 +87,7 @@ repoIsClean () {
 }
 
 repoIsEqualToRev () { REV="${1:?}" ; DIR="${2:-$DIR_OVERLAY}"
-  STDOUT="$(hg status --rev $REV "$DIR")" ; RETVAL=$?
+  STDOUT="$(hg diff --rev $REV "$DIR")" ; RETVAL=$?
   ([ -z "$STDOUT" ] && [ $RETVAL -eq 0 ]) && return 0 || return 1
 }
 
@@ -220,6 +220,7 @@ statusConfigFromIp () { IPADDR="${1:?}"
   # Clone the repo to make comparisons
   try "cp -a \"$(hg root)\" \"$TMP_CLONE-$CNAME/\" >/dev/null" \
     || return 1
+  rm -r "$TMP_CLONE-$CNAME/.hg/hgrc"
     
   # cd to the temp repo clone
   cd $(pwd|sed "s!$(hg root)!$TMP_CLONE-$CNAME/!") \
@@ -252,14 +253,14 @@ statusConfigFromIp () { IPADDR="${1:?}"
     0)      # Local and remote copies are equal, that means we can consider the current revision as pushed
             # even if it wasn't done with "action push". So, update LastRevPushed cookie
             # If you do "hg commit; ruci push; hg rollback; ...; hg commit", then a simple
-            # "hg status" should update/fix cookies that point to vanished changeset ids.
+            # "ruci status" should update/fix cookies that point to vanished changeset ids.
       ( cd $OLDPWD && writeLastRevPushed )
       log "$IPADDR Reachable and updated.$STATUSMSG"
     ;;
     1)      # If copies differ, might be because local has a new revision waiting to be pushed,
             # (in which case working copy is identical to the one in revision readLastRevPushed)
       hg commit -m "Fresh overlay for comparison"
-      try "hg status --rev -1 --rev -2 \"$DIR_TO_DIFF\" " >/dev/null
+      try "hg diff --stat --rev -1 --rev -2 \"$DIR_TO_DIFF\" " >/dev/null
       if repoIsEqualToRev "$(readLastRevPushed)" "$DIR_TO_DIFF" ; then
         log "$IPADDR Reachable, outdated. Remote revision $(readLastRevPushed|cut -b -12).$STATUSMSG"
       else  # or else because changes happened only remotely.
