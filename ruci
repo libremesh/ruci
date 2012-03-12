@@ -68,6 +68,7 @@ export ETC_FAILSAFE="etc.failsafe/"
 
 export CNAMES_PUSHED="/tmp/ruci.pushed"
 export CNAMES_DIRTY="/tmp/ruci.dirty"
+export TMP_CLONE="/tmp/ruci.hgclone.$EPOCH"
 cat /dev/null >"${CNAMES_PUSHED:?}"
 cat /dev/null >"${CNAMES_DIRTY:?}"
 
@@ -216,18 +217,27 @@ statusConfigFromIp () { IPADDR="${1:?}"
 
   CNAME="$(basename `pwd -L`)"
   
-  ( mkdir -p "$DIR_PULL_TMP"
-
+  # Clone the repo to make comparisons
+  try "cp -a \"$(hg root)\" \"$TMP_CLONE-$CNAME/\" >/dev/null" \
+    || return 1
+    
+  # cd to the temp repo clone
+  cd $(pwd|sed "s!$(hg root)!$TMP_CLONE-$CNAME/!") \
+    || return 2
+  
+  ( rm -rf "$DIR_TO_DIFF"
+ 
     log "Pulling /$DIR_TO_DIFF from $IPADDR ..."
 
     try "$SSH_PERSIST $IPADDR \"$TAR -c -f - /$DIR_TO_DIFF \" >$DIR_PULL_TMP.tar" \
-      || { RETVAL=$? ; rm -rf "$DIR_PULL_TMP"{/,.tar} ; return $RETVAL ; }
+      || { RETVAL=$? ; rm -rf "$DIR_PULL_TMP.tar" ; return $RETVAL ; }
     
-    try "$TAR -x -f $DIR_PULL_TMP.tar -C $DIR_PULL_TMP" \
-      || { RETVAL=$? ; rm -rf "$DIR_PULL_TMP"{/,.tar} ; return $RETVAL ; }
+    try "$TAR -x -f $DIR_PULL_TMP.tar" \
+      || { RETVAL=$? ; rm -rf "$DIR_PULL_TMP.tar" ; return $RETVAL ; }
 
-    rm -rf "$DIR_PULL_TMP/$DIR_OVERLAY/$ETC_FAILSAFE" # Ignore the temp $ETC_FAILSAFE on remote hosts
+    rm -rf "$DIR_OVERLAY/$ETC_FAILSAFE" # Ignore the temp $ETC_FAILSAFE on remote hosts
     rm -rf "$DIR_PULL_TMP.tar"
+    hg addremove "$DIR_TO_DIFF"
     
     log "Pulled successfully." ) >/dev/null \
       || { log "$IPADDR Down." ; return ; }
@@ -236,26 +246,20 @@ statusConfigFromIp () { IPADDR="${1:?}"
     && STATUSMSG=" Counting down to revert-to-failsafe..." \
     && echo -n " $CNAME" >> "$CNAMES_PUSHED"
     
-  # Compares local working copy with freshly pulled overlay. Returns 0 if they are equal, 1 if differences are found.
-  try "diff -q . . ; ( find -L \"$DIR_TO_DIFF\" \"$DIR_PULL_TMP/$DIR_TO_DIFF\" -type l -printf \"%f\n\"\
-                | diff -X - -qr \"$DIR_TO_DIFF\" \"$DIR_PULL_TMP/$DIR_TO_DIFF\" ) " >/dev/null
-    RETVAL=$?
-
-  # Makes the freshly pulled overlay a working copy, to compare against past revisions.
-  mv "$DIR_TO_DIFF" "$DIR_TO_DIFF.bkp"
-  mv "$DIR_PULL_TMP/$DIR_TO_DIFF" "$DIR_TO_DIFF"
-  rm -rf "$DIR_PULL_TMP"
-  
+  repoIsEqualToRev "-1" "$DIR_TO_DIFF" ; RETVAL=$?
+   
   case $RETVAL in
     0)      # Local and remote copies are equal, that means we can consider the current revision as pushed
             # even if it wasn't done with "action push". So, update LastRevPushed cookie
             # If you do "hg commit; ruci push; hg rollback; ...; hg commit", then a simple
             # "hg status" should update/fix cookies that point to vanished changeset ids.
-      writeLastRevPushed
+      ( cd $OLDPWD && writeLastRevPushed )
       log "$IPADDR Reachable and updated.$STATUSMSG"
     ;;
     1)      # If copies differ, might be because local has a new revision waiting to be pushed,
             # (in which case working copy is identical to the one in revision readLastRevPushed)
+      hg commit -m "Fresh overlay for comparison"
+      try "hg status --rev -1 --rev -2 \"$DIR_TO_DIFF\" " >/dev/null
       if repoIsEqualToRev "$(readLastRevPushed)" "$DIR_TO_DIFF" ; then
         log "$IPADDR Reachable, outdated. Remote revision $(readLastRevPushed|cut -b -12).$STATUSMSG"
       else  # or else because changes happened only remotely.
@@ -267,8 +271,7 @@ statusConfigFromIp () { IPADDR="${1:?}"
   esac
   
   # Clean up the comparison scenario and leave everything as it was previously
-  rm -rf "$DIR_TO_DIFF"
-  mv "$DIR_TO_DIFF.bkp" "$DIR_TO_DIFF"
+  rm -rf "${TMP_CLONE:?}-${CNAME:?}/"
 }
 
 pullConfigs () {
