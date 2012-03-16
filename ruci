@@ -25,13 +25,13 @@
 ### Usage: $0 push [-n] [-f] [-w secs] [-i <host>] NAME [[-i <host>] NAME] ...
 ###        $0 pull [-z] [-i <host>] NAME [[-i <host>] NAME] ...
 ###        $0 confirm NAME [NAME] ...
-###        $0 status [-f] NAME [NAME] ...
+###        $0 status [-f] [-i <host>] NAME [[-i <host>] NAME] ...
 ### 
 ### Manage remote uci configuration in NAME(s)
 ### 
 ###  -w, --wait NUM	  After applying configuration, wait for NUM seconds
 ###                     before reboot.
-###  -i, --ip HOST		Push the configuration to specified IP or host.
+###  -i, --ip HOST		Override the IP used for pull, push, status...
 ###                     Applies only to the next NAME specified in command line.
 ###  -n, --no-reboot	Prevent rebooting after pushing and applying configuration.
 ###  -z, --gzip       Use gzip compression on incoming network traffic during pull.
@@ -63,11 +63,12 @@ export DIR_UCI_CONFIG="$DIR_OVERLAY/etc/config/"
 export DIR_PULL_TMP="remote.$EPOCH"
 export DIR_TO_DIFF="${DIR_OVERLAY:?}/etc"
 export DIR_PUSH_TMP="overlay.new.$EPOCH"
-export DIR_TO_PUSH="/etc/"
+export DIR_TO_PUSH="etc/"
+export FILES_TO_QUICK_PUSH="/etc/{dropbear/authorized_keys,crontabs/,bat-hosts,hosts,profile,shadow}"
 export ETC_FAILSAFE="etc.failsafe/"
 
-export CNAMES_PUSHED="/tmp/ruci.pushed"
-export CNAMES_DIRTY="/tmp/ruci.dirty"
+export CNAMES_PUSHED="/tmp/ruci.pushed.$EPOCH"
+export CNAMES_DIRTY="/tmp/ruci.dirty.$EPOCH"
 export TMP_CLONE="/tmp/ruci.hgclone.$EPOCH"
 cat /dev/null >"${CNAMES_PUSHED:?}"
 cat /dev/null >"${CNAMES_DIRTY:?}"
@@ -185,14 +186,14 @@ pushConfigToIp () { IPADDR="${1:?}"
   rm -rf "$DIR_PUSH_TMP.tar"
 
   log "Config sent. Applying changes..."
-  try "$SSH_PERSIST $IPADDR \"  cd /$DIR_OVERLAY \
+  try "$SSH_PERSIST $IPADDR '  cd /$DIR_OVERLAY \
                             &&  rm -rf /$ETC_FAILSAFE \
                             &&  (  cp -a /etc /$ETC_FAILSAFE \
                                 && cp -a etc /tmp/$DIR_PUSH_TMP/$ETC_FAILSAFE \
-                                && rm -rf ./${DIR_TO_PUSH:-*} \
+                                && rm -rf ${DIR_TO_PUSH:-*}'$DIR_TO_PUSH' \
                                 && cp -a /tmp/$DIR_PUSH_TMP/${DIR_TO_PUSH:-*} . ) \
                             &&  (  sleep $REBOOT_WAIT \
-                                && $REBOOT_CMD & ) \" " \
+                                && $REBOOT_CMD & ) ' " \
     || return
 
   writeLastRevPushed
@@ -214,7 +215,8 @@ confirmConfigToIp () { IPADDR="${1:?}"
 statusConfigFromIp () { IPADDR="${1:?}"
   RETVAL=
   STATUSMSG=
-
+  STDERR=
+  
   CNAME="$(basename `pwd -L`)"
   
   # Clone the repo to make comparisons
@@ -225,30 +227,31 @@ statusConfigFromIp () { IPADDR="${1:?}"
   # cd to the temp repo clone
   cd $(pwd|sed "s!$(hg root)!$TMP_CLONE-$CNAME/!") \
     || return 2
+
+  log "Pulling /$DIR_TO_DIFF from $IPADDR ..." >/dev/null
+  # Try to pull remote /overlay. If it fails, cleanup .tar tempfile and log the reason why host is Down.
+  STDERR="$(eval $SSH_PERSIST $IPADDR "$TAR -c -f - /$DIR_TO_DIFF " 2>&1 >$DIR_PULL_TMP.tar)" \
+    || { rm -rf "${TMP_CLONE:?}-${CNAME:?}/" ; log "$IPADDR Down. ($(echo $STDERR|head -n 1 -c 30))" ; return ; }
   
-  ( rm -rf "$DIR_TO_DIFF"
- 
-    log "Pulling /$DIR_TO_DIFF from $IPADDR ..."
+  # Unpack recently pulled /overlay
+  rm -rf "$DIR_TO_DIFF"
+  try "$TAR -x -f $DIR_PULL_TMP.tar"
+  
+  # Clean up and prepare comparison
+  rm -rf "$DIR_PULL_TMP.tar"          
+  rm -rf "$DIR_OVERLAY/$ETC_FAILSAFE" # Ignore the temp $ETC_FAILSAFE on remote hosts
+  hg addremove "$DIR_TO_DIFF" >/dev/null 
+  log "Pulled successfully."  >/dev/null
 
-    try "$SSH_PERSIST $IPADDR \"$TAR -c -f - /$DIR_TO_DIFF \" >$DIR_PULL_TMP.tar" \
-      || { RETVAL=$? ; rm -rf "$DIR_PULL_TMP.tar" ; return $RETVAL ; }
-    
-    try "$TAR -x -f $DIR_PULL_TMP.tar" \
-      || { RETVAL=$? ; rm -rf "$DIR_PULL_TMP.tar" ; return $RETVAL ; }
-
-    rm -rf "$DIR_OVERLAY/$ETC_FAILSAFE" # Ignore the temp $ETC_FAILSAFE on remote hosts
-    rm -rf "$DIR_PULL_TMP.tar"
-    hg addremove "$DIR_TO_DIFF"
-    
-    log "Pulled successfully." ) >/dev/null \
-      || { log "$IPADDR Down." ; return ; }
-
+  # Check if remote has $ETC_FAILSAFE present, suggesting it's on the countdown
   try "$SSH_PERSIST $IPADDR /bin/sh -c \'[ -d /$ETC_FAILSAFE ]\' " \
     && STATUSMSG=" Counting down to revert-to-failsafe..." \
     && echo -n " $CNAME" >> "$CNAMES_PUSHED"
-    
+  
   repoIsEqualToRev "-1" "$DIR_TO_DIFF" ; RETVAL=$?
-   
+  
+  [ -z "$(hg status --rev $REV "$DIR")" ] ; RETVAL=$(( $RETVAL + $?))
+
   case $RETVAL in
     0)      # Local and remote copies are equal, that means we can consider the current revision as pushed
             # even if it wasn't done with "action push". So, update LastRevPushed cookie
@@ -257,7 +260,7 @@ statusConfigFromIp () { IPADDR="${1:?}"
       ( cd $OLDPWD && writeLastRevPushed )
       log "$IPADDR Reachable and updated.$STATUSMSG"
     ;;
-    1)      # If copies differ, might be because local has a new revision waiting to be pushed,
+    *)      # If copies differ, might be because local has a new revision waiting to be pushed,
             # (in which case working copy is identical to the one in revision readLastRevPushed)
       hg commit -m "Fresh overlay for comparison"
       try "hg diff --stat --rev -1 --rev -2 \"$DIR_TO_DIFF\" " >/dev/null
@@ -266,9 +269,8 @@ statusConfigFromIp () { IPADDR="${1:?}"
       else  # or else because changes happened only remotely.
         log "$IPADDR Reachable, with remote untracked changes. Please pull, manually merge and commit.$STATUSMSG"
       fi
-      echo -n "|$CNAME" >> "$CNAMES_DIRTY"
+      echo -n "${CNAME}|" >> "$CNAMES_DIRTY"
     ;;
-    *) log "Unknown error ($RETVAL) in diff.$STATUSMSG" ;;
   esac
   
   # Clean up the comparison scenario and leave everything as it was previously
@@ -424,15 +426,18 @@ statusConfigs () {
     
     case "$ARG" in
       -f|--full ) DIR_TO_DIFF="$DIR_OVERLAY" ;;
+      -i|--ip ) IPADDR="$1" ; shift ;;
       * )
         cd "$ARG"
           [ -d "$DIR_UCI_CONFIG" ] \
-            || { log "UCI config directory not found. Ignoring host." ; continue ; }
+            || { log "UCI config directory not found. Ignoring host." ; unset IPADDR ; continue ; }
           
-          IPADDR=$(getIpFromUciConfig)
+          [ -z "$IPADDR" ] && IPADDR=$(getIpFromUciConfig)
           
           statusConfigFromIp "$IPADDR" &
         cd "$OLDPWD"
+        
+        unset IPADDR
       ;;
     esac
   done
@@ -466,12 +471,6 @@ sort "$LOGFILE" | sed "/\(Pulling\|Sending\|Trying\)/s/^/\n/" > "$LOGFILE".sort
 mv -f "$LOGFILE.sort" "$LOGFILE"
 
 echo
-if [ -s "$CNAMES_DIRTY" ] ; then
-  egrep "($(cat "$CNAMES_DIRTY" |sed 's/^|//'))" "$LOGFILE"
-  rm -rf "${CNAMES_DIRTY:?}"
-fi
-
-if [ -s "$CNAMES_PUSHED" ] ; then
-  echo -e "Don't forget to run:\n$CMDNAME confirm $(<"$CNAMES_PUSHED")"
-  rm -rf "${CNAMES_PUSHED:?}"
-fi
+[ -s "$CNAMES_DIRTY" ] && egrep "($(<"$CNAMES_DIRTY")^$)" "$LOGFILE" | uniq
+[ -s "$CNAMES_PUSHED" ] && echo -e "Don't forget to run:\n$CMDNAME confirm $(<"$CNAMES_PUSHED")"
+rm -rf "${CNAMES_DIRTY:?}" "${CNAMES_PUSHED:?}"
