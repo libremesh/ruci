@@ -51,7 +51,7 @@ export NO_REBOOT_CMD="/bin/true"
 export TAR="tar" # This command must accept argument -z to enable gzip compression
 export CMDNAME="$(basename "$0")"
 export SSH_PERSIST="ssh -o \"ControlMaster auto\" \
-                    -o \"ControlPath /tmp/$CMDNAME_ssh_%r@%h:%p\" \
+                    -o \"ControlPath /tmp/${CMDNAME}_ssh_%r@%h:%p\" \
                     -o \"ControlPersist 60\" \
                     -o \"ServerAliveInterval 10\" \
                     -o \"ConnectTimeout 20\" \
@@ -215,7 +215,6 @@ confirmConfigToIp () { IPADDR="${1:?}"
 statusConfigFromIp () { IPADDR="${1:?}"
   RETVAL=
   STATUSMSG=
-  STDERR=
   
   CNAME="$(basename `pwd -L`)"
   
@@ -229,9 +228,9 @@ statusConfigFromIp () { IPADDR="${1:?}"
     || return 2
 
   log "Pulling /$DIR_TO_DIFF from $IPADDR ..." >/dev/null
-  # Try to pull remote /overlay. If it fails, cleanup .tar tempfile and log the reason why host is Down.
-  STDERR="$(eval $SSH_PERSIST $IPADDR "$TAR -c -f - /$DIR_TO_DIFF " 2>&1 >$DIR_PULL_TMP.tar)" \
-    || { rm -rf "${TMP_CLONE:?}-${CNAME:?}/" ; log "$IPADDR Down. ($(echo $STDERR|head -n 1 -c 30))" ; return ; }
+  # Try to pull remote /overlay. If it fails, cleanup .tar tempfile.
+  try "$SSH_PERSIST $IPADDR \"$TAR -c -f - /$DIR_TO_DIFF \" >$DIR_PULL_TMP.tar" \
+    || { rm -rf "${TMP_CLONE:?}-${CNAME:?}/" ; return ; }
   
   # Unpack recently pulled /overlay
   rm -rf "$DIR_TO_DIFF"
