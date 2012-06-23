@@ -82,7 +82,7 @@ usage () { REASON="$*"
 }
 
 getIpFromUciConfig () { 
-  uci -c "$DIR_UCI_CONFIG" get network.lan.ipaddr
+  uci -c "$DIR_UCI_CONFIG" get system.@system[0].hostname
 }
 
 repoIsClean () {
