@@ -22,7 +22,7 @@
 #       MA 02110-1301, USA.
 #
 ### 
-### Usage: $0 push [-n] [-f] [-w secs] [-i <host>] NAME [[-i <host>] NAME] ...
+### Usage: $0 push [-n] [-f|-q] [-w secs] [-i <host>] NAME [[-i <host>] NAME] ...
 ###        $0 pull [-z] [-i <host>] NAME [[-i <host>] NAME] ...
 ###        $0 confirm NAME [NAME] ...
 ###        $0 status [-f] [-i <host>] NAME [[-i <host>] NAME] ...
@@ -40,6 +40,8 @@
 ###                     Increases network traffic = slower perfomance.
 ###                     Useful to check for package installs or removals
 ###                     or to push a complete overlay to a clean install of openwrt.
+###  -q, --quick      Push only a small subset of files in /etc that don't need reboot,
+###                     such as /etc/hosts. Implies -n, overrides -f.
 ###
 #
 #
@@ -64,7 +66,7 @@ export DIR_PULL_TMP="remote.$EPOCH"
 export DIR_TO_DIFF="${DIR_OVERLAY:?}/etc"
 export DIR_PUSH_TMP="overlay.new.$EPOCH"
 export DIR_TO_PUSH="etc/"
-export FILES_TO_QUICK_PUSH="/etc/{dropbear/authorized_keys,crontabs/,bat-hosts,hosts,profile,shadow}"
+export FILES_TO_QUICK_PUSH="etc/{dropbear/authorized_keys,bat-hosts,hosts,profile,shadow}"
 export ETC_FAILSAFE="etc.failsafe/"
 
 export CNAMES_PUSHED="/tmp/ruci.pushed.$EPOCH"
@@ -186,18 +188,28 @@ pushConfigToIp () { IPADDR="${1:?}"
   rm -rf "$DIR_PUSH_TMP.tar"
 
   log "Config sent. Applying changes..."
-  try "$SSH_PERSIST $IPADDR '  cd /$DIR_OVERLAY \
-                            &&  rm -rf /$ETC_FAILSAFE \
-                            &&  (  cp -a /etc /$ETC_FAILSAFE \
-                                && cp -a etc /tmp/$DIR_PUSH_TMP/$ETC_FAILSAFE \
-                                && rm -rf ${DIR_TO_PUSH:-*}'$DIR_TO_PUSH' \
-                                && cp -a /tmp/$DIR_PUSH_TMP/${DIR_TO_PUSH:-*} . ) \
-                            &&  (  sleep $REBOOT_WAIT \
-                                && $REBOOT_CMD & ) ' " \
-    || return
+  if [ "$DIR_TO_PUSH" != "$FILES_TO_QUICK_PUSH" ] ; then
+    log "Sending $DIR_TO_PUSH"
+    try "$SSH_PERSIST $IPADDR '  cd /$DIR_OVERLAY \
+                              &&  rm -rf $ETC_FAILSAFE \
+                              &&  (  cp -a etc $ETC_FAILSAFE \
+                                  && cp -a etc /tmp/$DIR_PUSH_TMP/$ETC_FAILSAFE \
+                                  && rm -rf ${DIR_TO_PUSH:-*} \
+                                  && cp -a /tmp/$DIR_PUSH_TMP/${DIR_TO_PUSH:-*} . ) \
+                              &&  (  sleep $REBOOT_WAIT \
+                                  && $REBOOT_CMD & ) ' " \
+      || return
 
-  writeLastRevPushed
-  
+    writeLastRevPushed
+  else
+    log "Sending quick"
+    try "$SSH_PERSIST $IPADDR '  cd /$DIR_OVERLAY \
+                              &&  rm -rf $ETC_FAILSAFE \
+                              &&  (  cp -a etc $ETC_FAILSAFE \
+                                  && cp -a /tmp/$DIR_PUSH_TMP/etc/* /etc/ ) ' " \
+      || return
+  fi
+
   log "Done.$([ $REBOOT_CMD == $NO_REBOOT_CMD ] || echo " Rebooting in $REBOOT_WAIT secs...")"
 
   CNAME="$(basename `pwd -L`)"
@@ -374,6 +386,7 @@ pushConfigs () {
       -i|--ip ) IPADDR="$1" ; shift ;;
       -n|--no-reboot ) REBOOT_CMD="$NO_REBOOT_CMD" ;;
       -f|--full ) unset DIR_TO_PUSH ;;
+      -q|--quick ) DIR_TO_PUSH="$FILES_TO_QUICK_PUSH" ; REBOOT_CMD="$NO_REBOOT_CMD" ;;
       -w|--wait ) 
         if [ -z "${1//[0-9]/}" ] ; then
           REBOOT_WAIT=$1 ; shift
