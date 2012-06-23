@@ -276,7 +276,7 @@ statusConfigFromIp () { IPADDR="${1:?}"
       hg commit -m "Fresh overlay for comparison"
       try "hg diff --stat --rev -1 --rev -2 \"$DIR_TO_DIFF\" " >/dev/null
       if repoIsEqualToRev "$(readLastRevPushed)" "$DIR_TO_DIFF" ; then
-        log "$IPADDR Reachable, outdated. Remote revision $(readLastRevPushed|cut -b -12).$STATUSMSG"
+        log "$IPADDR Reachable, outdated. Remote revision $(readLastRevPushed|cut -b -12) .$STATUSMSG"
       else  # or else because changes happened only remotely.
         log "$IPADDR Reachable, with remote untracked changes. Please pull, manually merge and commit.$STATUSMSG"
       fi
