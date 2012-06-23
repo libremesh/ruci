@@ -168,7 +168,7 @@ pushConfigToIp () { IPADDR="${1:?}"
   RETVAL=
   PUSH_FILES=
   
-  try "$SSH_PERSIST $IPADDR /bin/sh -c \'[ -d /$ETC_FAILSAFE ]\' "
+  try "$SSH_PERSIST $IPADDR /bin/sh -c \'[ -d /$DIR_OVERLAY/$ETC_FAILSAFE ]\' "
     RETVAL=$?
     if [ $RETVAL -eq 0 ] ; then
       log "Previous push hasn't been confirmed yet. Use \`$CMDNAME confirm [...]\` first. Skipping..." 
@@ -218,7 +218,7 @@ pushConfigToIp () { IPADDR="${1:?}"
 
 confirmConfigToIp () { IPADDR="${1:?}"
   log "Trying to remove $ETC_FAILSAFE in $IPADDR ... "
-  try "$SSH_PERSIST $IPADDR \"/bin/rm -rfv /${ETC_FAILSAFE:?}\" " \
+  try "$SSH_PERSIST $IPADDR \"/bin/rm -rfv /$DIR_OVERLAY/${ETC_FAILSAFE:?}\" " \
     || return
 
   log "Done."
@@ -255,7 +255,7 @@ statusConfigFromIp () { IPADDR="${1:?}"
   log "Pulled successfully."  >/dev/null
 
   # Check if remote has $ETC_FAILSAFE present, suggesting it's on the countdown
-  try "$SSH_PERSIST $IPADDR /bin/sh -c \'[ -d /$ETC_FAILSAFE ]\' " \
+  try "$SSH_PERSIST $IPADDR /bin/sh -c \'[ -d /$DIR_OVERLAY/$ETC_FAILSAFE ]\' " \
     && STATUSMSG=" Counting down to revert-to-failsafe..." \
     && echo -n " $CNAME" >> "$CNAMES_PUSHED"
   
@@ -350,7 +350,7 @@ pushConfigsSafe () {
         PUSH_FILES=
   
         # Open ssh persistent connection
-        try "$SSH_PERSIST $IPADDR /bin/sh -c \'[ -d /$ETC_FAILSAFE ]\' "
+        try "$SSH_PERSIST $IPADDR /bin/sh -c \'[ -d /$DIR_OVERLAY/$ETC_FAILSAFE ]\' "
           RETVAL=$?
           if [ $RETVAL -eq 0 ] ; then
             log "Previous push hasn't been confirmed yet. Use \`$CMDNAME confirm ...\` first. Aborting..." 
