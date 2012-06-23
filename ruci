@@ -48,7 +48,7 @@
 
 export REBOOT_WAIT=15  # in seconds #DEPRECATED
 export TIMEOUT=15  # in seconds
-export REBOOT_CMD="/sbin/reboot"
+export REBOOT_CMD="/usr/sbin/safe-reboot now"
 export NO_REBOOT_CMD="/bin/true"
 export TAR="tar" # This command must accept argument -z to enable gzip compression
 export CMDNAME="$(basename "$0")"
@@ -67,7 +67,7 @@ export DIR_TO_DIFF="${DIR_OVERLAY:?}/etc"
 export DIR_PUSH_TMP="overlay.new.$EPOCH"
 export DIR_TO_PUSH="etc/"
 export FILES_TO_QUICK_PUSH="etc/{dropbear/authorized_keys,bat-hosts,hosts,profile,shadow}"
-export ETC_FAILSAFE="etc.failsafe/"
+export ETC_FAILSAFE="etc.last-good/"
 
 export CNAMES_PUSHED="/tmp/ruci.pushed.$EPOCH"
 export CNAMES_DIRTY="/tmp/ruci.dirty.$EPOCH"
@@ -256,7 +256,7 @@ statusConfigFromIp () { IPADDR="${1:?}"
 
   # Check if remote has $ETC_FAILSAFE present, suggesting it's on the countdown
   try "$SSH_PERSIST $IPADDR /bin/sh -c \'[ -d /$DIR_OVERLAY/$ETC_FAILSAFE ]\' " \
-    && STATUSMSG=" Counting down to revert-to-failsafe..." \
+    && STATUSMSG=" Counting down to revert-to-lastgood..." \
     && echo -n " $CNAME" >> "$CNAMES_PUSHED"
   
   repoIsEqualToRev "-1" "$DIR_TO_DIFF" ; RETVAL=$?
