@@ -210,7 +210,7 @@ pushConfigToIp () { IPADDR="${1:?}"
       || return
   fi
 
-  log "Done.$([ $REBOOT_CMD == $NO_REBOOT_CMD ] || echo " Rebooting in $REBOOT_WAIT secs...")"
+  log "Done.$([ "$REBOOT_CMD" == "$NO_REBOOT_CMD" ] || echo " Rebooting in $REBOOT_WAIT secs...")"
 
   CNAME="$(basename `pwd -L`)"
   echo -n " $CNAME" >> "$CNAMES_PUSHED"
