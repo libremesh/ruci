@@ -48,7 +48,7 @@
 
 export REBOOT_WAIT=15  # in seconds #DEPRECATED
 export TIMEOUT=15  # in seconds
-export REBOOT_CMD="/usr/sbin/safe-reboot now"
+export REBOOT_CMD="/usr/sbin/safe-reboot now &>/tmp/safe-reboot.log"
 export NO_REBOOT_CMD="/bin/true"
 export TAR="tar" # This command must accept argument -z to enable gzip compression
 export CMDNAME="$(basename "$0")"
@@ -190,7 +190,7 @@ pushConfigToIp () { IPADDR="${1:?}"
   log "Config sent. Applying changes..."
   if [ "$DIR_TO_PUSH" != "$FILES_TO_QUICK_PUSH" ] ; then
     log "Sending $DIR_TO_PUSH"
-    try "$SSH_PERSIST $IPADDR '  cd /$DIR_OVERLAY \
+    try "$SSH_PERSIST $IPADDR ' export PATH=\"/bin:/sbin:/usr/bin:/usr/sbin\" ; cd /$DIR_OVERLAY \
                               &&  rm -rf $ETC_FAILSAFE \
                               &&  (  cp -a etc $ETC_FAILSAFE \
                                   && cp -a etc /tmp/$DIR_PUSH_TMP/$ETC_FAILSAFE \
