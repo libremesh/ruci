@@ -1,10 +1,14 @@
 #!/bin/bash
 #
-# Dependencias locales y remotas: ssh, scp, tar 
-#   solo locales: uci, hg
+# Dependencies:
+#   (both local and remote host): ssh, scp, tar
+#   (only local): hg, uci
+# Getting uci for yourself is really easy:
+#   uci git clone git://nbd.name/uci.git
+# (compilation is a breeze)
+# or simply redefine getIpFromUciConfig()
 #
-#
-#       Copyleft 2012 Guido Iribarren <guidoiribarren@buenosaireslibre.org>
+#       Copyleft 2012 Gui Iribarren <gui@altermundi.net>
 #       
 #       This program is free software; you can redistribute it and/or modify
 #       it under the terms of the GNU General Public License as published by
