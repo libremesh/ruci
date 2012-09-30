@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # Dependencies:
-#   (both local and remote host): ssh, scp, tar
+#   (both local and remote host): ssh, scp, tar 
 #   (only local): hg, uci
 # Getting uci for yourself is really easy:
 #   uci git clone git://nbd.name/uci.git
@@ -399,7 +399,7 @@ pushConfigs () {
         fi
       ;;
       * )
-        cd "$ARG"
+        if cd "$ARG" ; then
           [ -d "$DIR_UCI_CONFIG" ] \
             || { log "UCI config directory not found. Ignoring host." ; unset IPADDR ; continue ; }
     
@@ -407,6 +407,7 @@ pushConfigs () {
     
           pushConfigToIp "$IPADDR" &
         cd "$OLDPWD"
+        fi
         
         unset IPADDR
       ;;
