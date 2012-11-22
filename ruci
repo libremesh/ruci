@@ -230,7 +230,7 @@ statusConfigFromIp () { IPADDR="${1:?}"
   # Clone the repo to make comparisons
   try "cp -a \"$(hg root)\" \"$TMP_CLONE-$CNAME/\" >/dev/null" \
     || return 1
-  rm -r "$TMP_CLONE-$CNAME/.hg/hgrc"
+  rm -f "$TMP_CLONE-$CNAME/.hg/hgrc"
     
   # cd to the temp repo clone
   cd $(pwd|sed "s!$(hg root)!$TMP_CLONE-$CNAME/!") \
