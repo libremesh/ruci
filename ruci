@@ -172,13 +172,13 @@ pushConfigToIp () { IPADDR="${1:?}"
   RETVAL=
   PUSH_FILES=
   
+  try "$TAR -c --owner root --group root -f $DIR_PUSH_TMP.tar -C $DIR_OVERLAY/ ./$DIR_TO_PUSH" \
+    || { RETVAL=$? ; rm -rf "$DIR_PUSH_TMP.tar" ; return $RETVAL ; }
+    
   log "Sending ${DIR_TO_PUSH:-/$DIR_OVERLAY} with '$TAR' to $IPADDR ... "
   try "$SSH_PERSIST $IPADDR \"/bin/mkdir -p /tmp/$DIR_PUSH_TMP/\" " \
     || return
-  
-  try "$TAR -c --owner root --group root -f $DIR_PUSH_TMP.tar -C $DIR_OVERLAY/ ./$DIR_TO_PUSH" \
-    || { RETVAL=$? ; rm -rf "$DIR_PUSH_TMP.tar" ; return $RETVAL ; }
-  
+
   try "$SSH_PERSIST $IPADDR \"$TAR -x -f - -C /tmp/$DIR_PUSH_TMP/ \" <$DIR_PUSH_TMP.tar" \
     || { RETVAL=$? ; rm -rf "$DIR_PUSH_TMP.tar" ; return $RETVAL ; }
   
