@@ -172,13 +172,6 @@ pushConfigToIp () { IPADDR="${1:?}"
   RETVAL=
   PUSH_FILES=
   
-  try "$SSH_PERSIST $IPADDR /bin/sh -c \'[ -d /$DIR_OVERLAY/$ETC_FAILSAFE ]\' "
-    RETVAL=$?
-    if [ $RETVAL -eq 0 ] ; then
-      log "Previous push hasn't been confirmed yet. Use \`$CMDNAME confirm [...]\` first. Skipping..." 
-      return
-    fi
-  
   log "Sending ${DIR_TO_PUSH:-/$DIR_OVERLAY} with '$TAR' to $IPADDR ... "
   try "$SSH_PERSIST $IPADDR \"/bin/mkdir -p /tmp/$DIR_PUSH_TMP/\" " \
     || return
