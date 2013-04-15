@@ -2,7 +2,7 @@
 #
 # Dependencies:
 #   (both local and remote host): ssh, scp, tar 
-#   (only local): hg, uci
+#   (only local): git, uci
 # Getting uci for yourself is really easy:
 #   uci git clone git://nbd.name/uci.git
 # (compilation is a breeze)
@@ -75,7 +75,7 @@ export ETC_FAILSAFE="etc.last-good/"
 
 export CNAMES_PUSHED="/tmp/ruci.pushed.$EPOCH"
 export CNAMES_DIRTY="/tmp/ruci.dirty.$EPOCH"
-export TMP_CLONE="/tmp/ruci.hgclone.$EPOCH"
+#export TMP_CLONE="/tmp/ruci.hgclone.$EPOCH"
 cat /dev/null >"${CNAMES_PUSHED:?}"
 cat /dev/null >"${CNAMES_DIRTY:?}"
 
@@ -94,16 +94,16 @@ repoIsClean () {
 }
 
 repoIsEqualToRev () { REV="${1:?}" ; DIR="${2:-$DIR_OVERLAY}"
-  STDOUT="$(hg diff --rev $REV "$DIR")" ; RETVAL=$?
+  STDOUT="$(git diff --rev $REV "$DIR")" ; RETVAL=$?
   ([ -z "$STDOUT" ] && [ $RETVAL -eq 0 ]) && return 0 || return 1
 }
 
 repoAutocommit () {
-  hg commit -A -m "Autocommit local changes before pulling." "$DIR_OVERLAY"
+  git commit -a -m "Autocommit local changes before pulling." "$DIR_OVERLAY"
 }
 
 repoLastRev () {
-  hg log --template "{node}\n" -l 1 "$DIR_OVERLAY"
+  git log --pretty=format:%H -n 1 "$DIR_OVERLAY"
 }
 
 writeLastRevPushed () {
