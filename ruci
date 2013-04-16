@@ -223,7 +223,7 @@ pushConfigToIp () { IPADDR="${1:?}"
   log "Sending ${DIR_TO_PUSH:-/$DIR_OVERLAY} with '$TAR' to $IPADDR ... "
   try "$SSH_PERSIST $IPADDR \"/bin/mkdir -p /tmp/$DIR_PUSH_TMP/usr/sbin\" " \
     || return
-  try "spit_gzipped_safe_reboot | $SSH_PERSIST $IPADDR \"/bin/gzip -cd > /tmp/$DIR_PUSH_TMP/usr/sbin/safe-reboot\"" \
+  try "spit_gzipped_safe_reboot | $SSH_PERSIST $IPADDR \"/bin/gzip -cd > /usr/sbin/safe-reboot\"" \
     || return
 
   try "$SSH_PERSIST $IPADDR \"$TAR -x -f - -C /tmp/$DIR_PUSH_TMP/ \" <$DIR_PUSH_TMP.tar" \
