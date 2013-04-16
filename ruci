@@ -90,11 +90,12 @@ getIpFromUciConfig () {
 }
 
 repoIsClean () {
-  repoIsEqualToRev "-1"
+  STDOUT="$(git status -s)" ; RETVAL=$?
+  ([ -z "$STDOUT" ] && [ $RETVAL -eq 0 ]) && return 0 || return 1
 }
 
 repoIsEqualToRev () { REV="${1:?}" ; DIR="${2:-$DIR_OVERLAY}"
-  STDOUT="$(git diff --rev $REV "$DIR")" ; RETVAL=$?
+  STDOUT="$(git diff -r $REV "$DIR")" ; RETVAL=$?
   ([ -z "$STDOUT" ] && [ $RETVAL -eq 0 ]) && return 0 || return 1
 }
 
