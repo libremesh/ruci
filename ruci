@@ -237,12 +237,9 @@ pushConfigToIp () { IPADDR="${1:?}"
     log "Sending $DIR_TO_PUSH"
     try "$SSH_PERSIST $IPADDR ' export PATH=\"/bin:/sbin:/usr/bin:/usr/sbin\" ; cd /$DIR_OVERLAY \
                               &&  rm -rf $ETC_FAILSAFE \
-                              &&  (  cp -a etc $ETC_FAILSAFE \
-                                  && cp -a etc /tmp/$DIR_PUSH_TMP/$ETC_FAILSAFE \
+                              &&  (  $SAFE_REBOOT_PATH -w $REBOOT_WAIT \
                                   && rm -rf ${DIR_TO_PUSH:-*} \
-                                  && cp -a /tmp/$DIR_PUSH_TMP/${DIR_TO_PUSH:-*} . ) \
-                              &&  (  sleep $REBOOT_WAIT \
-                                  && $REBOOT_CMD & ) ' " \
+                                  && cp -a /tmp/$DIR_PUSH_TMP/${DIR_TO_PUSH:-*} . ) ' " \
       || return
 
     writeLastRevPushed
