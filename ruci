@@ -260,7 +260,7 @@ pushConfigToIp () { IPADDR="${1:?}"
 
 confirmConfigToIp () { IPADDR="${1:?}"
   log "Trying to remove $ETC_FAILSAFE in $IPADDR ... "
-  try "$SSH_PERSIST $IPADDR \"/bin/rm -rfv /$DIR_OVERLAY/${ETC_FAILSAFE:?}\" " \
+  try "$SSH_PERSIST $IPADDR \"$SAFE_REBOOT cancel\" " \
     || return
 
   log "Done."
