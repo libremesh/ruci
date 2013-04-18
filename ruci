@@ -53,7 +53,7 @@
 export REBOOT_WAIT=15  # in seconds #DEPRECATED
 export TIMEOUT=15  # in seconds
 export REBOOT_CMD="/usr/sbin/safe-reboot now &>/tmp/safe-reboot.log"
-export SAFE_REBOOT_PATH="/usr/sbin/safe-reboot"
+export SAFE_REBOOT="/usr/sbin/safe-reboot"
 export NO_REBOOT_CMD="/bin/true"
 export TAR="tar" # This command must accept argument -z to enable gzip compression
 export CMDNAME="$(basename "$0")"
@@ -224,7 +224,7 @@ pushConfigToIp () { IPADDR="${1:?}"
   log "Sending ${DIR_TO_PUSH:-/$DIR_OVERLAY} with '$TAR' to $IPADDR ... "
   try "$SSH_PERSIST $IPADDR \"/bin/mkdir -p /tmp/$DIR_PUSH_TMP/usr/sbin\" " \
     || return
-  try "spit_gzipped_safe_reboot | $SSH_PERSIST $IPADDR \"/bin/gzip -cd > $SAFE_REBOOT_PATH ; chmod +x $SAFE_REBOOT_PATH\"" \
+  try "spit_gzipped_safe_reboot | $SSH_PERSIST $IPADDR \"/bin/gzip -cd > $SAFE_REBOOT ; chmod +x $SAFE_REBOOT\"" \
     || return
 
   try "$SSH_PERSIST $IPADDR \"$TAR -x -f - -C /tmp/$DIR_PUSH_TMP/ \" <$DIR_PUSH_TMP.tar" \
@@ -237,7 +237,7 @@ pushConfigToIp () { IPADDR="${1:?}"
     log "Sending $DIR_TO_PUSH"
     try "$SSH_PERSIST $IPADDR ' export PATH=\"/bin:/sbin:/usr/bin:/usr/sbin\" ; cd /$DIR_OVERLAY \
                               &&  rm -rf $ETC_FAILSAFE \
-                              &&  (  $SAFE_REBOOT_PATH -w $REBOOT_WAIT \
+                              &&  (  $SAFE_REBOOT -w $REBOOT_WAIT \
                                   && rm -rf ${DIR_TO_PUSH:-*} \
                                   && cp -a /tmp/$DIR_PUSH_TMP/${DIR_TO_PUSH:-*} . ) ' " \
       || return
