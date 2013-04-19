@@ -135,7 +135,7 @@ getIpFromUciConfig () {
 }
 
 repoIsClean () {
-  STDOUT="$(git status -s)" ; RETVAL=$?
+  STDOUT="$(git status -s .)" ; RETVAL=$?
   ([ -z "$STDOUT" ] && [ $RETVAL -eq 0 ]) && return 0 || return 1
 }
 
