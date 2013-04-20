@@ -165,7 +165,7 @@ tstamp () {
 }
 
 log () { TEXT="$*"
-  [ "$1" == "*" ] && CNAME="*" || CNAME="$(basename `pwd -L`)"
+  [ "$(echo $1 | cut -b 1)" == "*" ] && CNAME="${1#\*}" || CNAME="$(basename `pwd -L`)"
   echo "$TEXT" \
     | sed "/tar: removing leading ... from member/d" \
     | sed "s|^|[$CNAME] $(tstamp): |" \
@@ -522,7 +522,7 @@ case "$ACTION" in
   * ) usage "Error: Unknown action \"$ACTION\"" ;;
 esac
 
-log "*" "All jobs started. Sorted logfile will be written to $LOGFILE"
+log "**" "All jobs started. Sorted logfile will be written to $LOGFILE"
 wait
 sort "$LOGFILE" | sed "/\(Pulling\|Sending\|Trying\)/s/^/\n/" > "$LOGFILE".sort
 mv -f "$LOGFILE.sort" "$LOGFILE"
