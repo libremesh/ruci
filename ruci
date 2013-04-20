@@ -440,7 +440,7 @@ pushConfigs () {
       * )
         if cd "$ARG" ; then
           [ -d "$DIR_UCI_CONFIG" ] \
-            || { log "UCI config directory not found. Ignoring host." ; unset IPADDR ; continue ; }
+            || { log "UCI config directory not found. Ignoring host." ; cd "$OLDPWD" ; unset IPADDR ; continue ; }
     
           [ -z "$IPADDR" ] && IPADDR=$(getIpFromUciConfig)
     
@@ -464,7 +464,7 @@ confirmConfigs () {
   
     cd "$ARG"
       [ -d "$DIR_UCI_CONFIG" ] \
-        || { log "UCI config directory not found. Ignoring host." ; continue ; }
+        || { log "UCI config directory not found. Ignoring host." ; cd "$OLDPWD" ; continue ; }
       
       IPADDR=$(getIpFromUciConfig)
 
