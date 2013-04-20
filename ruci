@@ -266,6 +266,11 @@ confirmConfigToIp () { IPADDR="${1:?}"
   log "Done."
 }
 
+execConfigToIp () { IPADDR="${1:?}" ; shift ; CMDLINE="${@:?}"
+  try "$SSH_PERSIST $IPADDR '$CMDLINE'" || return
+
+  log "*$IPADDR" "Done."
+}
 statusConfigFromIp () { IPADDR="${1:?}"
   RETVAL=
   STATUSMSG=
@@ -473,6 +478,26 @@ confirmConfigs () {
   done
 }
 
+execConfigs () {
+  ARG=
+  IPADDR=
+
+  while [ -n "$1" ]; do
+    ARG="$1"
+    shift
+
+
+    case "$ARG" in
+      -c|--command ) EXEC_CMD="$1" ; shift ;;
+      * )
+        IPADDR="${ARG%%/}"
+        execConfigToIp "$IPADDR" "$EXEC_CMD" &
+        unset IPADDR
+      ;;
+    esac
+  done
+}
+
 statusConfigs () {
   ARG=
   IPADDR=
@@ -507,7 +532,7 @@ export LOGFILE="/tmp/$CMDNAME-$ACTION.log"
 rm -f "$LOGFILE"
 
 case "$ACTION" in
-  pull | push | confirm ) 
+  pull | push | confirm | exec)
     [ -z "$*" ] && usage "Error: No NAME(s) specified on command line."
     ${ACTION}Configs "$@"
   ;;
