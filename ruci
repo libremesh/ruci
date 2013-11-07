@@ -175,7 +175,7 @@ log () { TEXT="$*"
 try () { CMDLINE="${1:?}"
   CMD="${CMDLINE%% *}"
   CNAME="$(basename `pwd -L`)"
-  ERRLOG="/tmp/$CMD.${CNAME////}.$EPOCH"
+  ERRLOG="/tmp/$CMD.${CNAME////}.$EPOCH.$RANDOM"
   
   eval "$CMDLINE" &> "$ERRLOG"
   RETVAL=$?
