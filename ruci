@@ -136,7 +136,7 @@ usage () { REASON="$*"
 }
 
 getIpFromUciConfig () { 
-  uci -c "$DIR_UCI_CONFIG" get system.@system[0].hostname
+  grep hostname "$DIR_UCI_CONFIG/system" | cut -d \' -f 2
 }
 
 repoIsClean () {
