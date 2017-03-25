@@ -351,9 +351,7 @@ pullConfigs () {
         mkdir -p "$ARG"
         cd "$ARG"
           if ! [ -d "$DIR_UCI_CONFIG" ] && [ -z "$IPADDR" ] ; then 
-            log "UCI config directory not found! Please prepend --ip to specify where to pull from."
-            cd "$OLDPWD"
-            continue
+            IPADDR="$ARG"
           fi
     
           [ -z "$IPADDR" ] && IPADDR=$(getIpFromUciConfig)
