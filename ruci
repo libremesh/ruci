@@ -208,6 +208,7 @@ pullConfigFromIp () { IPADDR="${1:?}"
     || { RETVAL=$? ; rm -rf "$DIR_PULL_TMP"{/,.tar} ; return $RETVAL ; }
   
   try "$TAR -x -f $DIR_PULL_TMP.tar -C $DIR_PULL_TMP" \
+    --exclude=overlay/upper/etc/rc.d/* --exclude=overlay/upper/etc/uci-defaults/* --exclude=*odhcpd \
     || { RETVAL=$? ; rm -rf "$DIR_PULL_TMP"{/,.tar} ; return $RETVAL ; }
 
   rm -rf "$DIR_PULL_TMP/$DIR_OVERLAY/$ETC_FAILSAFE" # Ignore the temp $ETC_FAILSAFE on remote hosts
